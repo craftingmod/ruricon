@@ -125,9 +125,9 @@ async function check() {
   let now = originalNow()
   Date.now = () => now
   globalThis.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
-    if (delay === 1000) {
+    if (typeof delay === "number" && delay >= 100) {
       return originalTimeout(() => {
-        now += 1000
+        now += delay
         if (typeof handler === "function") handler(...args)
       }, 0)
     }
@@ -235,10 +235,10 @@ async function check() {
       "분할 수정과 대표 최종 수정에 역할·ID 태그, 기존 사용자 태그 보존",
     )
     assert(
-      requests[0].time === retryTime &&
+      requests[0].time === retryTime + 400 &&
         requests[1].time === retryTime + 35_000 &&
-        requests[2].time === requests[1].time,
-      "실패 후 생성 대기는 유지하고 수정은 즉시 실행",
+        requests[2].time === requests[1].time + 400,
+      "실패 후 생성 대기는 유지하고 수정은 400ms 간격으로 실행",
     )
     const final = requests.at(-1)!.params.get("content")!
     const restored = readMain(final)
@@ -393,7 +393,9 @@ async function check() {
       "동시 신규 요청도 공통 생성 대기열에서 순서대로 실행",
     )
     assert(
-      requests[0].path.endsWith("/modify/2678") && requests[0].time === concurrentTime,
+      requests[0].path.endsWith("/modify/2678") &&
+        requests[0].time >= concurrentTime + 400 &&
+        requests[0].time < concurrentTime + 35_000,
       "수정은 생성 대기열을 기다리지 않음",
     )
     html = body
@@ -420,7 +422,7 @@ async function check() {
     globalThis.setTimeout = originalTimeout
   }
   document.querySelector("#result")!.textContent =
-    "PASS · 메타데이터·복원·재시도·35초 생성 간격·수정 대기 제외·카운트다운·게시 잠금"
+    "PASS · 메타데이터·복원·재시도·35초 생성 간격·수정 400ms 간격·카운트다운·게시 잠금"
 }
 void check().catch((error) => {
   document.querySelector("#result")!.textContent = `FAIL · ${String(error)}`

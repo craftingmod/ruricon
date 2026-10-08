@@ -10,7 +10,7 @@ import {
   validateState,
   type IconSetState,
 } from "./articleMeta.ts"
-import { organizeImages, splitImages } from "./organizeImages.ts"
+import { isEmptyHtml, organizeImages, splitImages } from "./organizeImages.ts"
 
 export function parseSetTitle(title: string) {
   const main = title.trim().match(/^(.+?)\s+\(M\)$/)
@@ -139,16 +139,52 @@ export class IconSetController {
     this.save()
   }
 
-  splitImages() {
-    if (this.isSet || this.activePage !== 0 || !this.main || this.pages.size) return
+  canLoadArticle() {
+    return (
+      !!this.main &&
+      !this.isSet &&
+      this.activePage === 0 &&
+      this.pages.size === 0 &&
+      !this.publishing &&
+      !this.restoreFailed &&
+      isEmptyHtml(this.main.html)
+    )
+  }
+
+  loadHtml(html: string) {
     const previous = this.save()
-    const split = splitImages(previous)
+    if (!this.canLoadArticle())
+      throw new Error("게시글 불러오기는 빈 단일 페이지에서만 가능합니다.")
+    this.replaceHtml(html, previous)
+    this.main!.html = html
+  }
+
+  splitImages() {
+    if (!this.main) return
+    if (this.publishing) throw new Error("게시 중에는 분할 구성을 변경할 수 없습니다.")
+    const previous = this.save()
+    const existing = this.pages.size > 0
+    const source = existing
+      ? [...this.pages]
+          .sort(([a], [b]) => a - b)
+          .map(([, html]) => html)
+          .join("")
+      : previous
+    const split = splitImages(source, existing)
     if (!split) return
     this.syncTitle(split.pages.length)
-    this.replaceHtml(split.pages[0], previous)
-    this.main.html = split.mainHtml
+    const page = (existing && this.activePage === 0) || !split.pages.length ? 0 : 1
+    if (page !== 0 || this.activePage !== 0)
+      this.replaceHtml(page === 0 ? this.main.html : split.pages[0], previous)
+    if (!existing) this.main.html = split.mainHtml
+    const ids = [...this.articleIds].sort(([a], [b]) => a - b).map(([, id]) => id)
+    this.pages.clear()
+    this.articleIds.clear()
+    // Keep surplus published IDs in this session for reuse if the set grows again.
+    ids.forEach((id, index) => this.articleIds.set(index + 1, id))
     split.pages.forEach((html, index) => this.pages.set(index + 1, html))
-    this.activePage = 1
+    this.activePage = page
+    this.subject.maxLength = setNameLimit(this.mainArticleId, Math.max(1, split.pages.length))
     this.isSet = true
   }
 

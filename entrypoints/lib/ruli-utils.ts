@@ -1,3 +1,4 @@
+import { articlePostDelayMs } from "./constants.ts"
 import { getEditUrl, getViewUrl } from "./ruli-constants.ts"
 
 export interface Article {
@@ -55,6 +56,7 @@ export async function readArticle(boardId: number, articleId: number, isMobile =
     mode: "cors",
     redirect: "follow",
   })
+  if (!viewRequest.ok) return { success: false, content: "" }
 
   const domParser = new DOMParser()
   const dom = domParser.parseFromString(await viewRequest.text(), "text/html")
@@ -94,6 +96,8 @@ export function parseArticleURL(rawURL: string) {
 // shortcut: this page tracks its own writes; share the cooldown when cross-tab coordination is needed.
 let nextWriteAt = 0
 let pendingWrites = Promise.resolve()
+let nextPostAt = 0
+let pendingPosts = Promise.resolve()
 
 export async function writeArticle(
   article: Article,
@@ -108,6 +112,7 @@ export async function writeArticle(
   reason: string
 }> {
   let release: (() => void) | undefined
+  let releasePost: (() => void) | undefined
   if (options.articleId == null) {
     const previous = pendingWrites
     pendingWrites = new Promise<void>((resolve) => {
@@ -123,8 +128,18 @@ export async function writeArticle(
           setTimeout(resolve, Math.min(1000, nextWriteAt - Date.now())),
         )
       }
-      options.onWait?.(0)
     }
+    const previousPost = pendingPosts
+    pendingPosts = new Promise<void>((resolve) => {
+      releasePost = resolve
+    })
+    await previousPost
+    while (Date.now() < nextPostAt) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(articlePostDelayMs, nextPostAt - Date.now())),
+      )
+    }
+    if (release) options.onWait?.(0)
     const postfix = options.articleId != null ? `modify/${options.articleId}` : "write"
     const requestURL = getEditUrl(options.isMobile ?? false, article.board_id, postfix)
 
@@ -163,6 +178,10 @@ export async function writeArticle(
       reason: errorReason,
     }
   } finally {
+    if (releasePost) {
+      nextPostAt = Date.now() + articlePostDelayMs
+      releasePost()
+    }
     if (release) {
       // Count from response completion, with five seconds beyond the site's 30-second limit.
       nextWriteAt = Date.now() + 35_000

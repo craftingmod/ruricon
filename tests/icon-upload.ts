@@ -2,6 +2,7 @@ import { splitNum } from "../entrypoints/lib/constants.ts"
 import { IconSetController, parseSetTitle } from "../entrypoints/lib/editor/IconSetController.ts"
 import {
   countImages,
+  isEmptyHtml,
   organizeImages,
   splitImages,
 } from "../entrypoints/lib/editor/organizeImages.ts"
@@ -325,14 +326,14 @@ async function check() {
     "대표 보관 및 세트명 유지",
   )
   assert(
-    retryRoot.querySelector<HTMLButtonElement>(".ruricon-split")!.hidden,
-    "세트 구성 후 분할 숨김",
+    !retryRoot.querySelector<HTMLButtonElement>(".ruricon-split")!.hidden,
+    "세트 구성 후에도 일괄 분할 표시",
   )
   const firstSplitPage = retry.pages.get(1)
   retry.splitImages()
   assert(
     retry.pages.get(1) === firstSplitPage && retry.pages.size === Math.ceil(181 / splitNum),
-    "기존 세트 중복 분할 방지",
+    "동일한 분할을 다시 실행해도 이미지 중복 없음",
   )
   retry.selectPage(Math.ceil(181 / splitNum))
   await settle()
@@ -343,6 +344,87 @@ async function check() {
     "마지막 분할 페이지 복원",
   )
   retryCleanup()
+  subject.value = "재분할 테스트"
+  const mainOriginal = '<p>대표 원문 &amp; 설명</p><img src="https://example.invalid/main.gif">'
+  seditor.setHtml(mainOriginal)
+  const repartitionCleanup = mountIconUpload()
+  const repartitionRoot = document.querySelector<IconUploadRoot>(".ruricon-upload")!
+  const repartition = repartitionRoot.controller!
+  const icons = (prefix: string, count: number) =>
+    Array.from(
+      { length: count },
+      (_, index) => `<img src="https://example.invalid/${prefix}-${index}.gif">`,
+    ).join("")
+  repartition.pages.set(8, icons("late", 90))
+  repartition.pages.set(3, icons("early", 40))
+  repartition.articleIds.set(3, 4989)
+  repartition.articleIds.set(8, 4990)
+  repartition.selectPage(8)
+  seditor.setHtml(icons("late", 92))
+  const previousPage = seditor.getHtml()
+  const savedFirst = repartition.pages.get(3)
+  let repartitionFailed = false
+  failWrite = true
+  try {
+    repartition.splitImages()
+  } catch {
+    repartitionFailed = true
+  } finally {
+    failWrite = false
+  }
+  assert(
+    repartitionFailed &&
+      repartition.pages.get(3) === savedFirst &&
+      repartition.pages.get(8) === previousPage &&
+      repartition.articleIds.get(3) === 4989 &&
+      repartition.activePage === 8,
+    "쓰기 실패 시 분할 본문과 게시글 ID 유지",
+  )
+  repartition.selectPage(8)
+  repartitionRoot.querySelector<HTMLButtonElement>(".ruricon-split")!.click()
+  await settle()
+  const orderedSources = [...repartition.pages].flatMap(([, html]) =>
+    [...new DOMParser().parseFromString(html, "text/html").querySelectorAll("img")].map((image) =>
+      image.getAttribute("src"),
+    ),
+  )
+  assert(
+    repartition.main!.html === mainOriginal &&
+      orderedSources.length === 132 &&
+      orderedSources[0]?.includes("early-0") &&
+      orderedSources[39]?.includes("early-39") &&
+      orderedSources[40]?.includes("late-0") &&
+      orderedSources[131]?.includes("late-91") &&
+      !orderedSources.some((src) => src?.includes("main.gif")),
+    "분할 번호 순서·최신 편집 반영, 대표 이미지 제외",
+  )
+  assert(
+    countImages(repartition.pages.get(1)!) === 96 &&
+      countImages(repartition.pages.get(2)!) === 36 &&
+      repartition.articleIds.get(1) === 4989 &&
+      repartition.articleIds.get(2) === 4990,
+    "96개 재분할 및 기존 게시글 ID 재사용",
+  )
+  repartition.selectPage(0)
+  const representativeBefore = seditor.getHtml()
+  repartition.pages.set(1, icons("tiny", 20))
+  repartition.pages.set(2, "")
+  repartition.splitImages()
+  assert(
+    repartition.pages.size === 1 &&
+      countImages(repartition.pages.get(1)!) === 20 &&
+      seditor.getHtml() === representativeBefore &&
+      repartition.activePage === 0 &&
+      repartition.articleIds.get(2) === 4990,
+    "100개 이하도 재분할, 대표 편집 유지, 남은 게시글 ID 보관",
+  )
+  repartition.pages.set(1, "")
+  repartition.splitImages()
+  assert(
+    repartition.pages.size === 0 && seditor.getHtml() === representativeBefore,
+    "분할 이미지가 없으면 빈 분할 제거 및 대표 보존",
+  )
+  repartitionCleanup()
   subject.value = "GIF 영상 분할"
   seditor.setHtml(mixedVideos)
   const videoCleanup = mountIconUpload()
@@ -413,6 +495,105 @@ async function check() {
   seditor.setHtml(draft)
   const resumed = new IconSetController(subject)
   assert(resumed.activePage === 0 && resumed.main?.html === draft, "기존 대표 제목으로 초기화")
+  assert(
+    isEmptyHtml("<p><br></p><div><span>&nbsp;</span></div>") &&
+      !isEmptyHtml('<img src="x">') &&
+      !isEmptyHtml('<video src="x"></video>') &&
+      !isEmptyHtml("<hr>") &&
+      !isEmptyHtml("<p>내용</p>"),
+    "공백 판정은 텍스트와 미디어를 보호",
+  )
+  subject.value = "불러오기 테스트"
+  const emptyHtml = "<p><br></p>"
+  seditor.setHtml(emptyHtml)
+  const loadCleanup = mountIconUpload()
+  const loadRoot = document.querySelector<IconUploadRoot>(".ruricon-upload")!
+  const loadRow = loadRoot.querySelector<HTMLElement>(".ruricon-load-row")!
+  const loadId = loadRoot.querySelector<HTMLInputElement>("#ruricon-article-id")!
+  const loadButton = loadRoot.querySelector<HTMLButtonElement>(".ruricon-load")!
+  const originalFetch = globalThis.fetch
+  let releaseRead: (() => void) | undefined
+  let requestCount = 0
+  let httpStatus = 200
+  const imported = '<p>불러온 본문</p><img src="https://example.invalid/import.gif">'
+  globalThis.fetch = async (input, init) => {
+    requestCount++
+    assert(
+      input === "https://bbs.ruliweb.com/community/board/98/read/4989" && init?.method === "get",
+      "readArticle로 지정 ID 조회",
+    )
+    if (releaseRead)
+      await new Promise<void>((resolve) => {
+        releaseRead = resolve
+      })
+    return new Response(
+      `<div class="board_main"><div class="board_main_view"><div class="view_content"><article><div>${imported}</div></article></div></div></div>`,
+      { status: httpStatus },
+    )
+  }
+  const finishRead = async () => {
+    for (let attempt = 0; attempt < 100 && loadId.disabled; attempt++) await settle()
+    assert(!loadId.disabled, "조회 작업 종료")
+  }
+  try {
+    assert(!loadRow.hidden, "빈 단일 페이지에만 조회 UI 표시")
+    loadId.value = "bad"
+    loadButton.click()
+    await finishRead()
+    assert(requestCount === 0 && seditor.getHtml() === emptyHtml, "잘못된 ID는 요청하지 않음")
+    loadId.value = "4989"
+    httpStatus = 404
+    loadButton.click()
+    await finishRead()
+    assert(seditor.getHtml() === emptyHtml, "HTTP 실패 시 본문 유지")
+    httpStatus = 200
+    releaseRead = () => {}
+    loadButton.click()
+    const entered = "<p>조회 중 작성한 본문</p>"
+    seditor.setHtml(entered)
+    releaseRead!()
+    releaseRead = undefined
+    await finishRead()
+    assert(seditor.getHtml() === entered && loadRow.hidden, "조회 중 작성한 내용 덮어쓰기 방지")
+    seditor.setHtml(emptyHtml)
+    source.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+    loadButton.click()
+    await finishRead()
+    assert(
+      seditor.getHtml() === imported &&
+        loadRoot.controller!.main!.html === imported &&
+        loadRow.hidden,
+      "HTML 및 Controller 저장, 내용이 생기면 조회 UI 숨김",
+    )
+    assert(
+      subject.value === "불러오기 테스트" && loadRoot.controller!.mainArticleId === null,
+      "조회 글의 제목과 ID는 현재 글에 채택하지 않음",
+    )
+    seditor.setHtml(emptyHtml)
+    let loadWriteFailed = false
+    failWrite = true
+    try {
+      loadRoot.controller!.loadHtml(imported)
+    } catch {
+      loadWriteFailed = true
+    } finally {
+      failWrite = false
+    }
+    assert(
+      loadWriteFailed && loadRoot.controller!.main!.html === emptyHtml,
+      "편집기 쓰기 실패 시 원본 캐시 보존",
+    )
+    loadRoot.controller!.selectPage(0)
+    assert(seditor.getHtml() === emptyHtml, "쓰기 실패 후 원본 HTML 복구")
+    loadRoot.controller!.addPage()
+    source.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+    assert(loadRow.hidden, "빈 분할 페이지에는 조회 UI 숨김")
+  } finally {
+    globalThis.fetch = originalFetch
+    loadCleanup()
+  }
   subject.value = "냥냥콘"
   seditor.setHtml("<p>대표 세트 설명</p>")
   mountIconUpload()

@@ -1,5 +1,7 @@
 import { getEditUrl, iconBoardId } from "./ruli-constants.ts"
 
+export const articlePostDelayMs = 400
+
 // @TODO remove hardcoded path
 export const chromeExec = "C:/Program Files/Google/Chrome Beta/Application/chrome.exe"
 

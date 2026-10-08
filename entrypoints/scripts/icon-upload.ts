@@ -1,6 +1,8 @@
 import { splitNum } from "../lib/constants.ts"
 import { IconSetController, parseSetTitle } from "../lib/editor/IconSetController.ts"
 import { countImages } from "../lib/editor/organizeImages.ts"
+import { iconBoardId } from "../lib/ruli-constants.ts"
+import { readArticle } from "../lib/ruli-utils.ts"
 
 import "./icon-upload.css"
 
@@ -33,7 +35,12 @@ export function mountIconUpload() {
     <div class="ruricon-upload-row">
       <span>유틸리티</span>
       <button type="button" class="ruricon-organize" title="현재 본문의 이미지를 맨 아래 8열 grid로 모읍니다.">정리</button>
-      <button type="button" class="ruricon-split" title="이미지를 ${splitNum}개씩 grid로 나누고 이미지 외 본문은 대표에 보관합니다." hidden>분할</button>
+      <button type="button" class="ruricon-split" title="이미지를 ${splitNum}개씩 grid로 나눕니다." hidden>일괄 분할</button>
+    </div>
+    <div class="ruricon-upload-row ruricon-load-row" hidden>
+      <label for="ruricon-article-id">게시글 불러오기</label>
+      <input id="ruricon-article-id" type="text" inputmode="numeric" placeholder="게시글 ID" aria-label="불러올 게시글 ID">
+      <button type="button" class="ruricon-load">불러오기</button>
     </div>
     <div class="ruricon-upload-row"><span>게시</span><button type="button" class="ruricon-publish">세트 게시</button><a class="ruricon-main-link" hidden>대표 편집</a></div>
     <p class="ruricon-upload-notice" role="status"></p>
@@ -51,6 +58,10 @@ export function mountIconUpload() {
   const notice = root.querySelector<HTMLElement>(".ruricon-upload-notice")!
   const publish = root.querySelector<HTMLButtonElement>(".ruricon-publish")!
   const mainLink = root.querySelector<HTMLAnchorElement>(".ruricon-main-link")!
+  const loadRow = root.querySelector<HTMLElement>(".ruricon-load-row")!
+  const articleId = root.querySelector<HTMLInputElement>("#ruricon-article-id")!
+  const load = root.querySelector<HTMLButtonElement>(".ruricon-load")!
+  let loading = false
   const rawSubmit = document.querySelector<HTMLElement>("#write_submit")
   const rawHtml = rawSubmit?.innerHTML
   const rawOpacity = rawSubmit?.style.getPropertyValue("opacity") ?? ""
@@ -127,6 +138,7 @@ export function mountIconUpload() {
       doc.addEventListener("input", scheduleUpdate)
     }
     publish.disabled = true
+    load.disabled = true
     bundleSubmit.disabled = true
     next.disabled = true
     organize.disabled = true
@@ -147,13 +159,18 @@ export function mountIconUpload() {
       return
     }
     const controller = root.controller
+    loadRow.hidden = !controller.canLoadArticle()
+    load.disabled = loading || loadRow.hidden
+    articleId.disabled = loading
     organize.disabled = false
     const count = countImages(controller.getHtml(controller.activePage))
-    split.hidden =
-      controller.isSet || controller.activePage !== 0 || controller.pages.size > 0 || count <= 100
+    split.hidden = !controller.main || (controller.pages.size === 0 && count <= 100)
+    split.title = controller.pages.size
+      ? `분할 페이지의 이미지만 번호 순서대로 모아 ${splitNum}개씩 다시 나눕니다. 대표 본문은 유지합니다.`
+      : `이미지를 ${splitNum}개씩 grid로 나누고 이미지 외 본문은 대표에 보관합니다.`
     split.disabled = false
     const name = subject!.value.trim()
-    publish.disabled = !controller.main
+    publish.disabled = !controller.main || loading
     bundleSubmit.disabled = publish.disabled
     const bundled = controller.isSet && controller.pages.size > 0
     bundleSubmit.hidden = !bundled
@@ -211,7 +228,7 @@ export function mountIconUpload() {
       ? "현재 본문을 저장하고 새 페이지의 빈 본문으로 전환합니다."
       : "현재 본문을 대표로 저장하고 빈 #1 분할로 전환합니다."
     notice.textContent =
-      publishStatus ||
+      (loading ? "게시글을 불러오고 있습니다." : publishStatus) ||
       (count >= 100
         ? `${count > 100 ? `${count - 100}개 초과했습니다. ` : "100개를 채웠습니다. "}남은 아이콘은 다음 페이지에 작성해주세요.`
         : "")
@@ -239,7 +256,7 @@ export function mountIconUpload() {
   rawSubmit?.addEventListener("click", preventNativeSubmit, true)
 
   publish.addEventListener("click", async () => {
-    if (locked || !root.controller) return
+    if (locked || loading || !root.controller) return
     const category = Number(
       document.querySelector<HTMLSelectElement | HTMLInputElement>('[name="category"]')?.value,
     )
@@ -292,6 +309,34 @@ export function mountIconUpload() {
     }
   })
   bundleSubmit.addEventListener("click", () => publish.click())
+  load.addEventListener("click", async () => {
+    const controller = root.controller
+    if (locked || loading || !controller) return
+    try {
+      controller.save()
+      if (!controller.canLoadArticle())
+        throw new Error("게시글 불러오기는 빈 단일 페이지에서만 가능합니다.")
+      const value = articleId.value.trim()
+      const id = Number(value)
+      if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(id))
+        throw new Error("올바른 게시글 ID를 입력해주세요.")
+      loading = true
+      load.disabled = articleId.disabled = true
+      publish.disabled = bundleSubmit.disabled = true
+      notice.textContent = "게시글을 불러오고 있습니다."
+      const result = await readArticle(iconBoardId, id)
+      if (disposed || root.controller !== controller) return
+      if (!result.success) throw new Error("게시글 본문을 찾지 못했습니다.")
+      controller.loadHtml(result.content)
+      publishStatus = "게시글 본문을 불러왔습니다."
+    } catch (error) {
+      publishStatus = error instanceof Error ? error.message : "게시글을 불러오지 못했습니다."
+    } finally {
+      loading = false
+      articleId.disabled = false
+      if (!disposed) update()
+    }
+  })
 
   next.addEventListener("click", () => run(() => root.controller?.addPage()))
   organize.addEventListener("click", () => run(() => root.controller?.organizeImages()))

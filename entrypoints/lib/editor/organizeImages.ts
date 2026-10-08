@@ -17,6 +17,14 @@ export function countImages(html: string) {
   return parseIconHtml(html).body.querySelectorAll("img").length
 }
 
+export function isEmptyHtml(html: string) {
+  const body = parseIconHtml(html).body
+  return (
+    !body.textContent?.replace(/[\u200b\ufeff]/g, "").trim() &&
+    !body.querySelector("[data-meta], :not(p, br, div, span, b, strong, i, em, u, s, font)")
+  )
+}
+
 export function organizeImages(html: string, imagesOnly = false) {
   const doc = parseIconHtml(html)
   const images = [...doc.body.querySelectorAll("img[src]")]
@@ -45,10 +53,10 @@ export function organizeImages(html: string, imagesOnly = false) {
   return images.length || trimmed ? doc.body.innerHTML.trim() : html
 }
 
-export function splitImages(html: string) {
+export function splitImages(html: string, imagesOnly = false) {
   const doc = parseIconHtml(html)
   const images = [...doc.body.querySelectorAll("img[src]")]
-  if (images.length <= 100) return null
+  if (!imagesOnly && images.length <= 100) return null
   const pages: string[] = []
   for (let index = 0; index < images.length; index += splitNum) {
     pages.push(
@@ -61,5 +69,5 @@ export function splitImages(html: string) {
     )
   }
   for (const image of images) image.remove()
-  return { mainHtml: organizeImages(doc.body.innerHTML), pages }
+  return { mainHtml: imagesOnly ? "" : organizeImages(doc.body.innerHTML), pages }
 }
