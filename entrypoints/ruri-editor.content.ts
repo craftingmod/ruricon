@@ -1,11 +1,10 @@
-import { iconBoardId, pcDomain } from "./lib/constants.ts"
+import { editorPages } from "./lib/constants.ts"
+import { main as editorMain } from "./scripts/ruli-editor.ts"
 
 export default defineContentScript({
-  matches: [
-    `https://${pcDomain}/community/board/${iconBoardId}/write`,
-    `https://${pcDomain}/community/board/${iconBoardId}/modify/*`,
-  ],
+  matches: editorPages,
   main() {
     console.log("Hello content.")
+    return editorMain()
   },
 })

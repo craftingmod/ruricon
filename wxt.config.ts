@@ -1,12 +1,14 @@
 import { defineConfig } from "wxt"
 import { resolve } from "node:path"
+import { chromeExec, editorPages } from "./entrypoints/lib/constants.ts"
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   webExt: {
     binaries: {
-      chrome: "C:/Program Files/Google/Chrome Beta/Application/chrome.exe", // Use Chrome Beta instead of regular Chrome
+      chrome: chromeExec, // Use Chrome Beta instead of regular Chrome
     },
+    startUrls: [editorPages[0]],
     chromiumProfile: resolve(".chrome"),
     keepProfileChanges: true,
   },
