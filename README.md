@@ -1,4 +1,6 @@
-# Rulicon
+# RuliCon
+
+아직 Alpha도 아닌 Develop 단계
 
 ## 빌드
 
