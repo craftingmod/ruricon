@@ -1,4 +1,4 @@
-import { splitNum } from "@/entrypoints/lib/constants.ts";
+import { splitNum } from "../entrypoints/lib/constants.ts"
 import { IconSetController, parseSetTitle } from "../entrypoints/lib/editor/IconSetController.ts"
 import {
   countImages,
@@ -54,23 +54,26 @@ async function check() {
   )
   const splitVideos = splitImages(mixedVideos)!
   assert(
-    splitVideos.pages.length === 2 &&
-    countImages(splitVideos.pages[0]) === splitNum &&
-      countImages(splitVideos.pages[1]) === 11,
+    splitVideos.pages.length === Math.ceil(101 / splitNum) &&
+      countImages(splitVideos.pages[0]) === splitNum &&
+      countImages(splitVideos.pages.at(-1)!) === 101 - (splitVideos.pages.length - 1) * splitNum,
     `video 치환 후 ${splitNum}개 분할`,
   )
   assert(
     splitVideos.mainHtml.includes("movie.mp4") && !splitVideos.mainHtml.includes("?gif"),
     "일반 mp4는 Main에 보관",
   )
-  for (const size of [101, 180, 181, 1454]) {
+  for (const size of [101, Math.max(101, splitNum * 2), Math.max(101, splitNum * 2 + 1), 1454]) {
     const split = splitImages(`<p>세트 설명</p><p><br></p>${iconHtml(size)}`)!
     assert(split.mainHtml === "<p>세트 설명</p>", "이미지 외 본문은 Main에 보관")
-    assert(split.pages.length === Math.ceil(size / 90), "90개씩 페이지 생성")
+    assert(split.pages.length === Math.ceil(size / splitNum), `${splitNum}개씩 페이지 생성`)
     const images = split.pages.flatMap((html, page) => {
       const doc = new DOMParser().parseFromString(html, "text/html")
       const icons = [...doc.querySelectorAll("img")]
-      assert(icons.length === Math.min(90, size - page * 90), "각 페이지 90개 이하")
+      assert(
+        icons.length === Math.min(splitNum, size - page * splitNum),
+        `각 페이지 ${splitNum}개 이하`,
+      )
       assert(
         doc.body.children.length === 1 &&
           doc.body.firstElementChild!.getAttribute("style")!.includes("repeat(8, 1fr)"),
@@ -267,7 +270,7 @@ async function check() {
   await settle()
   const retry = retryRoot.controller!
   assert(
-    retry.isSet && retry.activePage === 1 && retry.pages.size === 3,
+    retry.isSet && retry.activePage === 1 && retry.pages.size === Math.ceil(181 / splitNum),
     "분할 후 세트 및 첫 Slave 활성화",
   )
   assert(
@@ -281,14 +284,15 @@ async function check() {
   const firstSplitPage = retry.pages.get(1)
   retry.splitImages()
   assert(
-    retry.pages.get(1) === firstSplitPage && retry.pages.size === 3,
+    retry.pages.get(1) === firstSplitPage && retry.pages.size === Math.ceil(181 / splitNum),
     "기존 세트 중복 분할 방지",
   )
-  retry.selectPage(3)
+  retry.selectPage(Math.ceil(181 / splitNum))
   await settle()
   assert(
     new DOMParser().parseFromString(seditor.getHtml(), "text/html").querySelectorAll("img")
-      .length === 1,
+      .length ===
+      181 - (Math.ceil(181 / splitNum) - 1) * splitNum,
     "마지막 분할 페이지 복원",
   )
   retryCleanup()
@@ -305,8 +309,8 @@ async function check() {
   videoSplit.click()
   await settle()
   assert(
-    videoRoot.controller!.pages.size === 2 &&
-      videoRoot.querySelector(".ruricon-upload-count")!.textContent === "90 / 100",
+    videoRoot.controller!.pages.size === Math.ceil(101 / splitNum) &&
+      videoRoot.querySelector(".ruricon-upload-count")!.textContent === `${splitNum} / 100`,
     "GIF 영상 포함 실제 버튼 분할",
   )
   assert(
@@ -377,7 +381,7 @@ async function check() {
   seditor.setHtml("<p>2페이지</p>" + "<img>".repeat(87))
   await settle()
   document.querySelector("#result")!.textContent =
-    "PASS · mp4?gif 치환, 일반 mp4 보존, 영상 포함 quota·분할, 90개 분할, grid 정리, 실패 보호"
+    `PASS · mp4?gif 치환, 일반 mp4 보존, 영상 포함 quota·분할, ${splitNum}개 분할, grid 정리, 실패 보호`
 }
 
 void check().catch((error: unknown) => {

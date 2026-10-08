@@ -1,3 +1,4 @@
+import { splitNum } from "../lib/constants.ts"
 import { IconSetController, parseSetTitle } from "../lib/editor/IconSetController.ts"
 import { countImages } from "../lib/editor/organizeImages.ts"
 
@@ -31,7 +32,7 @@ export function mountIconUpload() {
     <div class="ruricon-upload-row">
       <span>유틸리티</span>
       <button type="button" class="ruricon-organize" title="현재 본문의 이미지를 맨 아래 8열 grid로 모읍니다.">정리</button>
-      <button type="button" class="ruricon-split" title="이미지를 90개씩 grid로 나누고 이미지 외 본문은 개요에 보관합니다." hidden>분할</button>
+      <button type="button" class="ruricon-split" title="이미지를 ${splitNum}개씩 grid로 나누고 이미지 외 본문은 개요에 보관합니다." hidden>분할</button>
     </div>
     <p class="ruricon-upload-notice" role="status"></p>
     <p class="ruricon-upload-footnote">페이지별 본문은 이 편집 화면에서 보관됩니다. 새로고침하면 사라지며, 게시물은 현재 페이지만 등록됩니다.</p>

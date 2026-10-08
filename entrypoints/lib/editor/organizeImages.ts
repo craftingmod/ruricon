@@ -1,4 +1,4 @@
-import { splitNum } from "../constants.ts"
+import { gridStyle, splitNum } from "../constants.ts"
 
 function parseIconHtml(html: string) {
   const doc = new DOMParser().parseFromString(html, "text/html")
@@ -24,7 +24,7 @@ export function organizeImages(html: string) {
   const grid = doc.createElement("p")
   grid.setAttribute(
     "style",
-    "display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; border: 2px solid Grey; background-color: White; padding: 2px; box-sizing: border-box;",
+    gridStyle,
   )
   images.forEach((image, index) => {
     const item = doc.createElement("img")
@@ -56,7 +56,7 @@ export function splitImages(html: string) {
     pages.push(
       organizeImages(
         images
-          .slice(index, index + 90)
+          .slice(index, index + splitNum)
           .map((image) => image.outerHTML)
           .join(""),
       ),
