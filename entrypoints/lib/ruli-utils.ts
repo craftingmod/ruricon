@@ -137,3 +137,13 @@ export async function writeArticle(article: Article, options: Partial<{
     reason: errorReason,
   }
 }
+
+const MAX_TITLE_LENGTH = 45;
+
+function createSegmentTitle(
+  title: string,
+  mainId: number,
+): string {
+  const suffix = ` (S${mainId.toString(36).toUpperCase()})`;
+  return title.slice(0, MAX_TITLE_LENGTH - suffix.length) + suffix;
+}

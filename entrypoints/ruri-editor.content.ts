@@ -3,9 +3,12 @@ import { main as editorMain } from "./scripts/ruli-editor.ts"
 
 export default defineContentScript({
   matches: editorPages,
-  async main(ctx) {
+  world: "MAIN",
+  async main() {
     console.log("Hello content.")
     const cleanup = await editorMain()
-    ctx.onInvalidated(cleanup)
+    window.addEventListener("pagehide", (event) => {
+      if (!event.persisted) cleanup()
+    })
   },
 })
