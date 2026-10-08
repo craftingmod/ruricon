@@ -1,3 +1,5 @@
+import { splitNum } from "../constants.ts"
+
 function parseIconHtml(html: string) {
   const doc = new DOMParser().parseFromString(html, "text/html")
   for (const video of doc.body.querySelectorAll("video[src]")) {
@@ -50,7 +52,7 @@ export function splitImages(html: string) {
   const images = [...doc.body.querySelectorAll("img[src]")]
   if (images.length <= 100) return null
   const pages: string[] = []
-  for (let index = 0; index < images.length; index += 90) {
+  for (let index = 0; index < images.length; index += splitNum) {
     pages.push(
       organizeImages(
         images

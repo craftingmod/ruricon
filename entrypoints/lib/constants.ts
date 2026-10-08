@@ -10,3 +10,5 @@ export const editorPages = [
 
 export const contentSample = `
 <p><br></p><p style="text-align: center;"><img src="https://i2.ruliweb.com/ori/26/09/23/1a0ce8acce92fe565.gif?icon=4048" style="max-width: 100%;"></p><p style="text-align: center;"><br></p><p style="text-align: center;"><br></p><p><br></p>`
+
+export const splitNum = 96

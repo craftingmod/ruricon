@@ -1,3 +1,4 @@
+import { splitNum } from "@/entrypoints/lib/constants.ts";
 import { IconSetController, parseSetTitle } from "../entrypoints/lib/editor/IconSetController.ts"
 import {
   countImages,
@@ -54,9 +55,9 @@ async function check() {
   const splitVideos = splitImages(mixedVideos)!
   assert(
     splitVideos.pages.length === 2 &&
-      countImages(splitVideos.pages[0]) === 90 &&
+    countImages(splitVideos.pages[0]) === splitNum &&
       countImages(splitVideos.pages[1]) === 11,
-    "video 치환 후 90개 분할",
+    `video 치환 후 ${splitNum}개 분할`,
   )
   assert(
     splitVideos.mainHtml.includes("movie.mp4") && !splitVideos.mainHtml.includes("?gif"),

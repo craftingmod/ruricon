@@ -29,3 +29,4 @@ web-ext.config.ts
 .chrome/**
 docs/agent
 docs/ruricon-research
+docs/human/DOM.html

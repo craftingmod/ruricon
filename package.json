@@ -8,6 +8,8 @@
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
+    "build:userscript": "vite build --config vite.userscript.config.ts",
+    "test:userscript": "bun run build:userscript && bun tests/userscript-build.mjs",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
