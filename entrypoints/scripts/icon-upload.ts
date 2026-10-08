@@ -1,4 +1,5 @@
 import { IconSetController, parseSetTitle } from "../lib/editor/IconSetController.ts"
+import { countImages } from "../lib/editor/organizeImages.ts"
 
 import "./icon-upload.css"
 
@@ -27,6 +28,11 @@ export function mountIconUpload() {
         <button type="button" class="ruricon-set-next"></button>
       </div>
     </div>
+    <div class="ruricon-upload-row">
+      <span>유틸리티</span>
+      <button type="button" class="ruricon-organize" title="현재 본문의 이미지를 맨 아래 8열 grid로 모읍니다.">정리</button>
+      <button type="button" class="ruricon-split" title="이미지를 90개씩 grid로 나누고 이미지 외 본문은 개요에 보관합니다." hidden>분할</button>
+    </div>
     <p class="ruricon-upload-notice" role="status"></p>
     <p class="ruricon-upload-footnote">페이지별 본문은 이 편집 화면에서 보관됩니다. 새로고침하면 사라지며, 게시물은 현재 페이지만 등록됩니다.</p>
   `
@@ -37,6 +43,8 @@ export function mountIconUpload() {
   const countLabel = root.querySelector<HTMLElement>(".ruricon-upload-count")!
   const list = root.querySelector<HTMLElement>(".ruricon-set-list")!
   const next = root.querySelector<HTMLButtonElement>(".ruricon-set-next")!
+  const organize = root.querySelector<HTMLButtonElement>(".ruricon-organize")!
+  const split = root.querySelector<HTMLButtonElement>(".ruricon-split")!
   const notice = root.querySelector<HTMLElement>(".ruricon-upload-notice")!
   const frames = new Set<HTMLIFrameElement>()
   const documents = new Set<Document>()
@@ -99,6 +107,8 @@ export function mountIconUpload() {
       doc.addEventListener("input", scheduleUpdate)
     }
     next.disabled = true
+    organize.disabled = true
+    split.disabled = true
     if (typeof seditor === "undefined") {
       notice.textContent = "편집기를 준비하고 있습니다."
       return
@@ -112,15 +122,17 @@ export function mountIconUpload() {
       return
     }
     const controller = root.controller
-    const countImages = (html: string) =>
-      new DOMParser().parseFromString(html, "text/html").querySelectorAll("img").length
+    organize.disabled = false
     const count = countImages(controller.getHtml(controller.activePage))
+    split.hidden =
+      controller.isSet || controller.activePage !== 0 || controller.pages.size > 0 || count <= 100
+    split.disabled = false
     const set = parseSetTitle(subject!.value)
     quota.value = Math.min(count, 100)
     countLabel.textContent = `${count} / 100`
     root.dataset.full = String(count >= 100)
     hint.textContent = controller.isSet
-      ? `${set ? `세트 '${set.name}'의` : "제목을 입력해주세요."} ${controller.activePage === 0 ? "Main (M)" : `Slave #${controller.activePage}`} 본문을 작성 중입니다.`
+      ? `${set ? `세트 '${set.name}'의` : "제목을 입력해주세요."} ${controller.activePage === 0 ? "개요" : `Slave #${controller.activePage}`} 본문을 작성 중입니다.`
       : "#1을 시작하면 현재 본문은 Main으로 보관되고 새 Slave 페이지를 작성합니다."
     const entries: [number, string][] = [...controller.pages].sort(([a], [b]) => a - b)
     if (controller.main) entries.unshift([0, controller.main.html])
@@ -135,8 +147,9 @@ export function mountIconUpload() {
       }
       button.className = page === controller.activePage ? "ruricon-set-current" : "ruricon-set-page"
       button.setAttribute("aria-pressed", String(page === controller.activePage))
-      const label = page === 0 ? (controller.isSet ? "Main (M)" : "단일 페이지") : `#${page}`
-      button.textContent = `${label} · ${page === 0 && controller.isSet ? `${controller.pages.size}페이지` : `${countImages(html)}개`}${page === controller.activePage ? " (작성 중)" : ""}`
+      const label = page === 0 ? (controller.isSet ? "개요" : "단일 페이지") : `#${page}`
+      button.textContent =
+        page === 0 && controller.isSet ? label : `${label} · ${countImages(html)}개`
       if (list.children[index] !== button) list.insertBefore(button, list.children[index] ?? null)
       index++
     }
@@ -152,10 +165,12 @@ export function mountIconUpload() {
     notice.textContent =
       count >= 100
         ? `${count > 100 ? `${count - 100}개 초과했습니다. ` : "100개를 채웠습니다. "}남은 아이콘은 다음 페이지에 작성해주세요.`
-        : "게시물당 100개 기준입니다. 실제 업로드 제한은 게시판 정책을 따릅니다."
+        : ""
   }
 
   next.addEventListener("click", () => run(() => root.controller?.addPage()))
+  organize.addEventListener("click", () => run(() => root.controller?.organizeImages()))
+  split.addEventListener("click", () => run(() => root.controller?.splitImages()))
   update()
 
   return () => {

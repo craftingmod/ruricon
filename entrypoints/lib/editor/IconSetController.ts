@@ -1,3 +1,5 @@
+import { organizeImages, splitImages } from "./organizeImages.ts"
+
 export function parseSetTitle(title: string) {
   const main = title.trim().match(/^(.+?)\s+\(M\)$/)
   if (main) return { name: main[1].trim(), page: 0, slaveId: undefined }
@@ -74,11 +76,7 @@ export class IconSetController {
     this.subject.dispatchEvent(new Event("change", { bubbles: true }))
   }
 
-  selectPage(page: number) {
-    if (page === 0 && !this.main) throw new Error("이 화면에는 Main 본문이 없습니다.")
-    const title = this.pageTitle(page)
-    const previous = this.restoreFailed ? this.getHtml(this.activePage) : this.save()
-    const html = this.getHtml(page)
+  private replaceHtml(html: string, previous: string) {
     try {
       seditor.setHtml(html)
     } catch (error) {
@@ -92,6 +90,14 @@ export class IconSetController {
       throw error
     }
     this.restoreFailed = false
+  }
+
+  selectPage(page: number) {
+    if (page === 0 && !this.main) throw new Error("이 화면에는 Main 본문이 없습니다.")
+    const title = this.pageTitle(page)
+    const previous = this.restoreFailed ? this.getHtml(this.activePage) : this.save()
+    const html = this.getHtml(page)
+    this.replaceHtml(html, previous)
     if (page === 0) this.main!.html = html
     else this.pages.set(page, html)
     this.activePage = page
@@ -102,6 +108,29 @@ export class IconSetController {
   addPage() {
     this.syncTitle()
     this.selectPage(Math.max(0, ...this.pages.keys()) + 1)
+  }
+
+  organizeImages() {
+    const previous = this.save()
+    const html = organizeImages(previous)
+    if (html === previous) return
+    this.replaceHtml(html, previous)
+    this.save()
+  }
+
+  splitImages() {
+    if (this.isSet || this.activePage !== 0 || !this.main || this.pages.size) return
+    const previous = this.save()
+    const split = splitImages(previous)
+    if (!split) return
+    this.pageTitle(split.pages.length)
+    const title = this.pageTitle(1)
+    this.replaceHtml(split.pages[0], previous)
+    this.main.html = split.mainHtml
+    split.pages.forEach((html, index) => this.pages.set(index + 1, html))
+    this.activePage = 1
+    this.isSet = true
+    this.writeTitle(title)
   }
 
   getHtml(page: number) {
