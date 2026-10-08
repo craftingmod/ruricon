@@ -17,15 +17,12 @@ export function countImages(html: string) {
   return parseIconHtml(html).body.querySelectorAll("img").length
 }
 
-export function organizeImages(html: string) {
+export function organizeImages(html: string, imagesOnly = false) {
   const doc = parseIconHtml(html)
   const images = [...doc.body.querySelectorAll("img[src]")]
 
   const grid = doc.createElement("p")
-  grid.setAttribute(
-    "style",
-    gridStyle,
-  )
+  grid.setAttribute("style", gridStyle)
   images.forEach((image, index) => {
     const item = doc.createElement("img")
     item.setAttribute("src", image.getAttribute("src")!)
@@ -33,6 +30,7 @@ export function organizeImages(html: string) {
     grid.append(item)
     image.remove()
   })
+  if (imagesOnly) return images.length ? grid.outerHTML : ""
   let trimmed = false
   for (const paragraph of doc.body.querySelectorAll("p")) {
     if (

@@ -48,7 +48,9 @@ export class IconSetController {
     if (page === 0 || this.activePage === 0 || this.pages.has(page)) {
       this.selectPage(page)
     } else {
-      const html = this.save()
+      const previous = this.save()
+      const html = organizeImages(previous, true)
+      this.replaceHtml(html, previous)
       this.pages.delete(this.activePage)
       this.pages.set(page, html)
       this.activePage = page
@@ -96,8 +98,9 @@ export class IconSetController {
     if (page === 0 && !this.main) throw new Error("이 화면에는 Main 본문이 없습니다.")
     const title = this.pageTitle(page)
     const previous = this.restoreFailed ? this.getHtml(this.activePage) : this.save()
-    const html = this.getHtml(page)
+    const html = page === 0 ? this.getHtml(page) : organizeImages(this.getHtml(page), true)
     this.replaceHtml(html, previous)
+    if (this.activePage > 0) this.pages.set(this.activePage, organizeImages(previous, true))
     if (page === 0) this.main!.html = html
     else this.pages.set(page, html)
     this.activePage = page
@@ -112,7 +115,7 @@ export class IconSetController {
 
   organizeImages() {
     const previous = this.save()
-    const html = organizeImages(previous)
+    const html = organizeImages(previous, this.activePage > 0)
     if (html === previous) return
     this.replaceHtml(html, previous)
     this.save()

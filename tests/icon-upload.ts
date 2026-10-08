@@ -92,6 +92,16 @@ async function check() {
   }
   const mixedHtml = `<p>앞부분<img title="x > y" src='a?x=1&amp;y=2' style="width: 50px">뒷부분</p><p><img src="b"></p><img SRC="b"><img alt="src 없음"><p>마지막 글</p>`
   const organized = organizeImages(mixedHtml)
+  const imageGrid = organizeImages(mixedHtml, true)
+  const onlyGridDoc = new DOMParser().parseFromString(imageGrid, "text/html")
+  assert(
+    onlyGridDoc.body.children.length === 1 && onlyGridDoc.body.textContent === "",
+    "Slave는 이미지 grid만 보관",
+  )
+  assert(
+    organizeImages(plainVideo + "<p>이미지 없는 Slave</p>", true) === "",
+    "이미지가 없는 Slave는 빈 본문",
+  )
   const organizedDoc = new DOMParser().parseFromString(organized, "text/html")
   const grid = organizedDoc.body.lastElementChild!
   assert(grid.tagName === "P" && grid.getAttribute("style")!.includes("repeat(8, 1fr)"), "8열 grid")
@@ -169,7 +179,7 @@ async function check() {
       source.value = html
     },
   }
-  body.innerHTML = "<p>첫 번째 본문</p>" + "<img>".repeat(101)
+  body.innerHTML = "<p>첫 번째 본문</p>" + iconHtml(101)
   await settle()
   const controller = root.controller!
   assert(controller && controller.activePage === 2, "root controller 생성")
@@ -180,14 +190,14 @@ async function check() {
     root.querySelector(".ruricon-upload-notice")!.textContent!.includes("1개 초과"),
     "초과 안내",
   )
-  const firstHtml = seditor.getHtml()
+  const firstHtml = organizeImages(seditor.getHtml(), true)
   next.click()
   await settle()
   assert(controller.pages.get(2) === firstHtml, "전환 전 HTML 보관")
   assert(subject.value === "냥냥콘 #3" && seditor.getHtml() === "", "빈 새 페이지")
-  body.innerHTML = "<p>두 번째 본문</p><img><img>"
+  body.innerHTML = "<p>두 번째 본문</p>" + iconHtml(2)
   await settle()
-  const secondHtml = seditor.getHtml()
+  const secondHtml = organizeImages(seditor.getHtml(), true)
   root.querySelector<HTMLButtonElement>('[data-page="2"]')!.click()
   await settle()
   assert(seditor.getHtml() === firstHtml && count() === "101 / 100", "이전 페이지 복원")
@@ -197,7 +207,7 @@ async function check() {
   root.querySelector<HTMLButtonElement>(".ruricon-organize")!.click()
   await settle()
   assert(
-    seditor.getHtml() === organized && controller.pages.get(2) === organized,
+    seditor.getHtml() === imageGrid && controller.pages.get(2) === imageGrid,
     "정리 버튼으로 현재 페이지 저장",
   )
   assert(controller.pages.get(3) === secondHtml, "다른 페이지는 변경 없음")
@@ -210,11 +220,11 @@ async function check() {
   await settle()
   assert(seditor.getHtml() === secondHtml && count() === "2 / 100", "제목 번호로 전환")
   source.hidden = false
-  source.value = "<p>HTML 모드 수정</p><img>"
+  source.value = "<p>HTML 모드 수정</p>" + iconHtml(1)
   source.dispatchEvent(new Event("input", { bubbles: true }))
   await settle()
   assert(count() === "1 / 100", "seditor HTML 모드")
-  const sourceHtml = source.value
+  const sourceHtml = organizeImages(source.value, true)
   controller.selectPage(2)
   controller.selectPage(3)
   await settle()
@@ -333,9 +343,9 @@ async function check() {
     blankRoot.controller!.main?.slaves === blankRoot.controller!.pages,
     "Main이 Slave 정보 참조",
   )
-  body.innerHTML = "<p>첫 Slave 본문</p>"
+  body.innerHTML = "<p>첫 Slave 본문</p>" + iconHtml(1)
   await settle()
-  const slaveHtml = seditor.getHtml()
+  const slaveHtml = organizeImages(seditor.getHtml(), true)
   blankNext.click()
   await settle()
   assert(
@@ -366,6 +376,18 @@ async function check() {
   blankRoot.controller!.selectPage(1)
   await settle()
   assert(String(subject.value) === "새 제목 #1 (S1234)", "Main 왕복 후 Slave ID 유지")
+  body.innerHTML = "<p>Slave 설명 제거</p>" + gifVideo + plainVideo
+  subject.value = "새 제목 #4 (S1234)"
+  subject.dispatchEvent(new Event("change", { bubbles: true }))
+  await settle()
+  const renamedSlave = new DOMParser().parseFromString(seditor.getHtml(), "text/html")
+  assert(
+    blankRoot.controller!.activePage === 4 &&
+      renamedSlave.body.children.length === 1 &&
+      !renamedSlave.querySelector("video") &&
+      renamedSlave.body.textContent === "",
+    "Slave 번호 변경도 grid 강제 정리",
+  )
   blankCleanup()
   subject.value = "기존 세트 (M)"
   seditor.setHtml(draft)
@@ -381,7 +403,7 @@ async function check() {
   seditor.setHtml("<p>2페이지</p>" + "<img>".repeat(87))
   await settle()
   document.querySelector("#result")!.textContent =
-    `PASS · mp4?gif 치환, 일반 mp4 보존, 영상 포함 quota·분할, ${splitNum}개 분할, grid 정리, 실패 보호`
+    `PASS · Slave 전환·번호 변경 grid 강제, Main 보존, GIF 치환, ${splitNum}개 분할, 실패 보호`
 }
 
 void check().catch((error: unknown) => {
