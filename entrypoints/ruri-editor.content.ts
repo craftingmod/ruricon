@@ -3,8 +3,9 @@ import { main as editorMain } from "./scripts/ruli-editor.ts"
 
 export default defineContentScript({
   matches: editorPages,
-  main() {
+  async main(ctx) {
     console.log("Hello content.")
-    return editorMain()
+    const cleanup = await editorMain()
+    ctx.onInvalidated(cleanup)
   },
 })

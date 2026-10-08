@@ -1,23 +1,29 @@
 import { contentSample } from "../lib/constants.ts"
 import { iconBoardId } from "../lib/ruli-constants.ts"
 import { createArticle, parseArticleURL, writeArticle } from "../lib/ruli-utils.ts"
+import { mountIconUpload } from "./icon-upload.ts"
 
 export async function main() {
+  const cleanup = mountIconUpload()
   console.log("Hello content 22.")
   const button = addTestButton()
   button.addEventListener("click", async () => {
-    const article = createArticle({
-      board_id: iconBoardId,
-      category: 8,
-      content: contentSample,
-      subject: "Test",
-    }, false)
-    const writeResult= await writeArticle(article)
+    const article = createArticle(
+      {
+        board_id: iconBoardId,
+        category: 8,
+        content: contentSample,
+        subject: "Test",
+      },
+      false,
+    )
+    const writeResult = await writeArticle(article)
     if (writeResult.success) {
       console.log(writeResult)
       const articleId = parseArticleURL(writeResult.url)
     }
   })
+  return cleanup
 }
 
 /**
