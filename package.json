@@ -21,6 +21,7 @@
     "validate": "bun run lint && bun run fmt:check"
   },
   "devDependencies": {
+    "@types/jquery": "^4.0.1",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
     "oxlint-tsgolint": "^7.0.2003",

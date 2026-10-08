@@ -27,3 +27,5 @@ web-ext.config.ts
 
 # Chrome dir
 .chrome/**
+docs/agent
+docs/ruricon-research
