@@ -73,7 +73,8 @@
 .ruricon-upload .ruricon-set-next,
 .ruricon-upload .ruricon-organize,
 .ruricon-upload .ruricon-split,
-.ruricon-upload .ruricon-publish {
+.ruricon-upload .ruricon-publish,
+.ruricon-bundle-submit {
   padding: 6px 12px;
   border: 1px solid #cbd2dc;
   border-radius: 24px;
@@ -86,7 +87,8 @@
 }
 .ruricon-upload .ruricon-organize,
 .ruricon-upload .ruricon-split,
-.ruricon-upload .ruricon-publish {
+.ruricon-upload .ruricon-publish,
+.ruricon-bundle-submit {
   border-radius: 6px;
   color: #24569c;
 }
@@ -94,6 +96,10 @@
   border: 2px solid #24569c;
   color: #24569c;
   font-weight: 700;
+}
+.ruricon-bundle-submit {
+  box-sizing: border-box;
+  width: 150px;
 }
 .ruricon-upload .ruricon-set-next {
   border-style: dashed;
@@ -104,14 +110,16 @@
 .ruricon-upload .ruricon-set-next:focus-visible,
 .ruricon-upload .ruricon-organize:focus-visible,
 .ruricon-upload .ruricon-split:focus-visible,
-.ruricon-upload .ruricon-publish:focus-visible {
+.ruricon-upload .ruricon-publish:focus-visible,
+.ruricon-bundle-submit:focus-visible {
   outline: 2px solid #24569c;
   outline-offset: 2px;
 }
 .ruricon-upload .ruricon-set-next:disabled,
 .ruricon-upload .ruricon-organize:disabled,
 .ruricon-upload .ruricon-split:disabled,
-.ruricon-upload .ruricon-publish:disabled {
+.ruricon-upload .ruricon-publish:disabled,
+.ruricon-bundle-submit:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -129,11 +137,30 @@
 .ruricon-upload .ruricon-split[hidden] {
   display: none;
 }
+.ruricon-bundle-submit[hidden] {
+  display: none;
+}
 .ruricon-upload[data-full="true"] .ruricon-upload-count {
   color: #ad5b00;
 }
 .ruricon-upload .ruricon-upload-footnote {
   margin: 0;
+}
+.ruricon-upload .ruricon-main-link {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid #7fa5d8;
+  border-radius: 6px;
+  background: #f1f4f8;
+  color: #24569c;
+  text-decoration: none;
+}
+.ruricon-upload .ruricon-main-link[hidden] {
+  display: none;
+}
+.ruricon-upload .ruricon-main-link:focus-visible {
+  outline: 2px solid #24569c;
+  outline-offset: 2px;
 }
 @media (max-width: 480px) {
   .ruricon-upload {

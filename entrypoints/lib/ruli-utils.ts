@@ -10,7 +10,7 @@ export interface Article {
   category: number // Internal category
   file: "" // Unused
   content: string // HTML
-  tag_input: ""
+  tag_input: string // `#aaa #bbb` like (` ` joined with `#` prefix)
   set_notify: 0 | 1
   is_spoiler: 0 | 1
   thumbnail_off: 0 | 1
@@ -26,10 +26,11 @@ export function toStringMap<T extends object>(record: T): Record<keyof T, string
   return kvPair
 }
 
-export function createArticle(
-  articleParam: Pick<Article, "board_id" | "subject" | "category" | "content">,
-  modify = false,
-): Article {
+type ManualArticle = Pick<Article, "board_id" | "subject" | "category" | "content"> & {
+  raw_tags?: string[]
+}
+
+export function createArticle(articleParam: ManualArticle, modify = false): Article {
   return {
     ...articleParam,
     cate: modify ? articleParam.category : "",
@@ -37,7 +38,8 @@ export function createArticle(
     action: "proc",
     subject_limit: 45,
     file: "",
-    tag_input: "",
+    tag_input:
+      articleParam.raw_tags != null ? articleParam.raw_tags.map((v) => `#${v}`).join(" ") : "",
     set_notify: 1,
     is_spoiler: 0,
     thumbnail_off: 0,
@@ -167,11 +169,4 @@ export async function writeArticle(
       release()
     }
   }
-}
-
-const MAX_TITLE_LENGTH = 45
-
-function createSegmentTitle(title: string, mainId: number): string {
-  const suffix = ` (S${mainId.toString(36).toUpperCase()})`
-  return title.slice(0, MAX_TITLE_LENGTH - suffix.length) + suffix
 }

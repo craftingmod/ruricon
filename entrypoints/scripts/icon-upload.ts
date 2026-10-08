@@ -1,5 +1,5 @@
 import { splitNum } from "../lib/constants.ts"
-import { IconSetController } from "../lib/editor/IconSetController.ts"
+import { IconSetController, parseSetTitle } from "../lib/editor/IconSetController.ts"
 import { countImages } from "../lib/editor/organizeImages.ts"
 
 import "./icon-upload.css"
@@ -11,7 +11,7 @@ export function mountIconUpload() {
   const subject = document.querySelector<HTMLInputElement>('input[name="subject"]')
   if (!board || !subject || board.querySelector(".ruricon-upload")) return () => {}
 
-  const slaveMainId = subject.value.match(/\(S([0-9A-Z]+)\)$/i)?.[1]
+  const slaveMainId = parseSetTitle(subject.value)?.slaveId
   const root = document.createElement("section") as IconUploadRoot
   root.className = "ruricon-upload"
   root.setAttribute("aria-label", "아이콘 업로드 및 세트 구성")
@@ -33,11 +33,11 @@ export function mountIconUpload() {
     <div class="ruricon-upload-row">
       <span>유틸리티</span>
       <button type="button" class="ruricon-organize" title="현재 본문의 이미지를 맨 아래 8열 grid로 모읍니다.">정리</button>
-      <button type="button" class="ruricon-split" title="이미지를 ${splitNum}개씩 grid로 나누고 이미지 외 본문은 개요에 보관합니다." hidden>분할</button>
+      <button type="button" class="ruricon-split" title="이미지를 ${splitNum}개씩 grid로 나누고 이미지 외 본문은 대표에 보관합니다." hidden>분할</button>
     </div>
-    <div class="ruricon-upload-row"><span>게시</span><button type="button" class="ruricon-publish">세트 게시</button><a class="ruricon-main-link" hidden>Main 편집</a></div>
+    <div class="ruricon-upload-row"><span>게시</span><button type="button" class="ruricon-publish">세트 게시</button><a class="ruricon-main-link" hidden>대표 편집</a></div>
     <p class="ruricon-upload-notice" role="status"></p>
-    <p class="ruricon-upload-footnote">세트 게시는 같은 화면에서 Main과 Slave를 저장합니다. 게시 전 초안과 게시 진행 정보는 새로고침하면 사라집니다.</p>
+    <p class="ruricon-upload-footnote">세트 게시는 같은 화면에서 대표와 분할을 저장합니다. 게시 전 초안과 게시 진행 정보는 새로고침하면 사라집니다.</p>
   `
   board.prepend(root)
 
@@ -51,6 +51,17 @@ export function mountIconUpload() {
   const notice = root.querySelector<HTMLElement>(".ruricon-upload-notice")!
   const publish = root.querySelector<HTMLButtonElement>(".ruricon-publish")!
   const mainLink = root.querySelector<HTMLAnchorElement>(".ruricon-main-link")!
+  const rawSubmit = document.querySelector<HTMLElement>("#write_submit")
+  const rawHtml = rawSubmit?.innerHTML
+  const rawOpacity = rawSubmit?.style.getPropertyValue("opacity") ?? ""
+  const rawOpacityPriority = rawSubmit?.style.getPropertyPriority("opacity") ?? ""
+  const bundleSubmit = document.createElement("button")
+  bundleSubmit.type = "button"
+  bundleSubmit.className = "ruricon-bundle-submit"
+  bundleSubmit.textContent = "묶음 등록"
+  bundleSubmit.hidden = true
+  bundleSubmit.disabled = true
+  rawSubmit?.parentElement?.append(bundleSubmit)
   let publishStatus = ""
   let locked = false
   const frames = new Set<HTMLIFrameElement>()
@@ -116,6 +127,7 @@ export function mountIconUpload() {
       doc.addEventListener("input", scheduleUpdate)
     }
     publish.disabled = true
+    bundleSubmit.disabled = true
     next.disabled = true
     organize.disabled = true
     split.disabled = true
@@ -142,12 +154,28 @@ export function mountIconUpload() {
     split.disabled = false
     const name = subject!.value.trim()
     publish.disabled = !controller.main
+    bundleSubmit.disabled = publish.disabled
+    const bundled = controller.isSet && controller.pages.size > 0
+    bundleSubmit.hidden = !bundled
+    if (rawSubmit) {
+      const html = bundled ? "Raw 등록" : rawHtml!
+      if (rawSubmit.innerHTML !== html) rawSubmit.innerHTML = html
+      const opacity = bundled ? "0.4" : rawOpacity
+      const priority = bundled ? "" : rawOpacityPriority
+      if (
+        rawSubmit.style.opacity !== opacity ||
+        rawSubmit.style.getPropertyPriority("opacity") !== priority
+      ) {
+        if (opacity) rawSubmit.style.setProperty("opacity", opacity, priority)
+        else rawSubmit.style.removeProperty("opacity")
+      }
+    }
     quota.value = Math.min(count, 100)
     countLabel.textContent = `${count} / 100`
     root.dataset.full = String(count >= 100)
     hint.textContent = controller.isSet
-      ? `${name ? `세트 '${name}'의` : "제목을 입력해주세요."} ${!controller.main ? "Slave" : controller.activePage === 0 ? "개요" : `Slave #${controller.activePage}`} 본문을 작성 중입니다.`
-      : "#1을 시작하면 현재 본문은 Main으로 보관되고 새 Slave 페이지를 작성합니다."
+      ? `${name ? `세트 '${name}'의` : "제목을 입력해주세요."} ${!controller.main ? "분할" : controller.activePage === 0 ? "대표" : `분할 #${controller.activePage}`} 본문을 작성 중입니다.`
+      : "#1을 시작하면 현재 본문은 대표로 보관되고 새 분할 페이지를 작성합니다."
     const entries: [number, string][] = [...controller.pages].sort(([a], [b]) => a - b)
     if (controller.main) entries.unshift([0, controller.main.html])
     let index = 0
@@ -162,12 +190,12 @@ export function mountIconUpload() {
       button.className = page === controller.activePage ? "ruricon-set-current" : "ruricon-set-page"
       button.setAttribute("aria-pressed", String(page === controller.activePage))
       const label = !controller.main
-        ? "Slave"
+        ? "분할"
         : page === 0
           ? controller.isSet
-            ? "개요"
+            ? "대표"
             : "단일 페이지"
-          : `#${page}`
+          : `분할 #${page}`
       button.textContent =
         page === 0 && controller.isSet ? label : `${label} · ${countImages(html)}개`
       if (list.children[index] !== button) list.insertBefore(button, list.children[index] ?? null)
@@ -177,11 +205,11 @@ export function mountIconUpload() {
       if (!entries.some(([page]) => page === Number(button.dataset.page))) button.remove()
     }
     const nextPage = Math.max(0, ...controller.pages.keys()) + 1
-    next.textContent = controller.isSet ? `+ #${nextPage} 추가` : "+ #1 시작"
+    next.textContent = controller.isSet ? `+ 분할 #${nextPage} 추가` : "+ 분할 #1 시작"
     next.disabled = !Number.isSafeInteger(nextPage)
     next.title = controller.isSet
       ? "현재 본문을 저장하고 새 페이지의 빈 본문으로 전환합니다."
-      : "현재 본문을 Main으로 저장하고 빈 #1 Slave로 전환합니다."
+      : "현재 본문을 대표로 저장하고 빈 #1 분할로 전환합니다."
     notice.textContent =
       publishStatus ||
       (count >= 100
@@ -189,8 +217,8 @@ export function mountIconUpload() {
         : "")
     if (!controller.main) {
       next.disabled = organize.disabled = split.disabled = true
-      notice.textContent = "Slave는 Main 편집 화면에서 수정해주세요."
-      if (slaveMainId) showMain(parseInt(slaveMainId, 36))
+      notice.textContent = "분할은 대표 편집 화면에서 수정해주세요."
+      if (slaveMainId) showMain(Number(slaveMainId))
     }
   }
 
@@ -201,14 +229,14 @@ export function mountIconUpload() {
   }
 
   function preventNativeSubmit(event: Event) {
-    if (locked || root.controller?.isSet) {
+    if (locked) {
       event.preventDefault()
       event.stopImmediatePropagation()
-      if (!locked) notice.textContent = "세트는 '세트 게시' 버튼으로 저장해주세요."
     }
   }
   const form = subject.closest("form")
   form?.addEventListener("submit", preventNativeSubmit, true)
+  rawSubmit?.addEventListener("click", preventNativeSubmit, true)
 
   publish.addEventListener("click", async () => {
     if (locked || !root.controller) return
@@ -237,7 +265,7 @@ export function mountIconUpload() {
       }
     }
     root.setAttribute("aria-busy", "true")
-    notice.textContent = "Main과 Slave를 게시하고 있습니다."
+    notice.textContent = "대표와 분할을 게시하고 있습니다."
     try {
       const id = await controller.publish(
         category,
@@ -263,6 +291,7 @@ export function mountIconUpload() {
       if (!disposed) update()
     }
   })
+  bundleSubmit.addEventListener("click", () => publish.click())
 
   next.addEventListener("click", () => run(() => root.controller?.addPage()))
   organize.addEventListener("click", () => run(() => root.controller?.organizeImages()))
@@ -271,7 +300,14 @@ export function mountIconUpload() {
 
   return () => {
     disposed = true
+    bundleSubmit.remove()
+    if (rawSubmit) {
+      rawSubmit.innerHTML = rawHtml!
+      if (rawOpacity) rawSubmit.style.setProperty("opacity", rawOpacity, rawOpacityPriority)
+      else rawSubmit.style.removeProperty("opacity")
+    }
     form?.removeEventListener("submit", preventNativeSubmit, true)
+    rawSubmit?.removeEventListener("click", preventNativeSubmit, true)
     window.clearInterval(readyTimer)
     observer.disconnect()
     board.removeEventListener("input", scheduleUpdate)

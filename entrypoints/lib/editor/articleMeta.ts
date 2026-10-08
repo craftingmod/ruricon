@@ -41,7 +41,7 @@ export function validateState(value: unknown): asserts value is IconSetState {
         (src) => typeof src !== "string" || !/^https?:\/\//i.test(src) || !URL.canParse(src),
       )
     ) {
-      throw new Error("Slave 번호, 게시글 ID 또는 이미지 주소를 확인해주세요.")
+      throw new Error("분할 번호, 게시글 ID 또는 이미지 주소를 확인해주세요.")
     }
     pages.add(slave.page)
     if (slave.articleId !== null) ids.add(slave.articleId)
@@ -77,17 +77,17 @@ export function readMain(html: string) {
       doc.querySelector('[data-meta^="ruricon:"]') ||
       doc.querySelector('[data-meta="ruricon-state"]')
     ) {
-      throw new Error("Main 메타데이터 형식 또는 버전을 확인해주세요.")
+      throw new Error("대표 메타데이터 형식 또는 버전을 확인해주세요.")
     }
     return { html, state: null }
   }
   const block = blocks[0]
   if (blocks.length !== 1 || block !== doc.body.firstElementChild || block.tagName !== "DIV") {
-    throw new Error("Main 맨 위의 메타데이터 블록을 확인해주세요.")
+    throw new Error("대표 맨 위의 메타데이터 블록을 확인해주세요.")
   }
   const states = block.querySelectorAll('[data-meta="ruricon-state"]')
   if (states.length !== 1 || doc.querySelectorAll('[data-meta="ruricon-state"]').length !== 1)
-    throw new Error("Main 상태 블록을 확인해주세요.")
+    throw new Error("대표 상태 블록을 확인해주세요.")
   const state = decodeState(states[0].textContent ?? "")
   // Locate only the leading managed div; keep the user's remaining HTML byte-for-byte.
   const tokens = html.matchAll(/<!--[\s\S]*?-->|<\/?[a-z][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>/gi)
@@ -103,7 +103,7 @@ export function readMain(html: string) {
       return { html: html.slice(token.index + token[0].length), state }
     }
   }
-  throw new Error("Main 메타데이터 경계를 확인해주세요.")
+  throw new Error("대표 메타데이터 경계를 확인해주세요.")
 }
 
 export function imageHtml(images: string[]) {
@@ -119,11 +119,16 @@ export function imageHtml(images: string[]) {
 }
 
 export function compileSlave(images: string[], mainId: number) {
-  if (!Number.isSafeInteger(mainId) || mainId < 1) throw new Error("Main ID를 확인해주세요.")
+  if (!Number.isSafeInteger(mainId) || mainId < 1) throw new Error("대표 ID를 확인해주세요.")
   const navigation = document.createElement("p")
+  navigation.setAttribute("style", "margin:0 0 12px")
   const link = document.createElement("a")
   link.setAttribute("href", `/community/board/${iconBoardId}/read/${mainId}`)
-  link.textContent = "Main으로 가기"
+  link.textContent = "대표로 이동"
+  link.setAttribute(
+    "style",
+    "display:inline-block;padding:6px 12px;border:1px solid #7fa5d8;border-radius:6px;background:#f1f4f8;color:#24569c;font-size:14px;text-decoration:none",
+  )
   navigation.append(link)
   return navigation.outerHTML + imageHtml(images)
 }
@@ -162,15 +167,20 @@ export function compileMain(html: string, state: IconSetState) {
   return block.outerHTML + body
 }
 
+export function setNameLimit(mainId: number | null = null, page = 1) {
+  return Math.min(36, 41 - String(mainId ?? 9999).length - String(Math.max(1, page)).length)
+}
+
 export function setTitle(name: string, page: number, mainId: number | null) {
-  if (!name.trim() || name.length > 38) throw new Error("세트명은 1~38자로 입력해주세요.")
+  const limit = setNameLimit(mainId, page)
+  if (!name.trim() || name.length > limit) throw new Error(`세트명은 1~${limit}자로 입력해주세요.`)
   if (
     !Number.isSafeInteger(page) ||
     page < 0 ||
     (page > 0 && (mainId === null || !validId(mainId)))
   )
-    throw new Error("페이지 번호 또는 Main ID를 확인해주세요.")
-  const title = page === 0 ? `${name} (M)` : `${name} (S${mainId!.toString(36).toUpperCase()})`
+    throw new Error("페이지 번호 또는 대표 ID를 확인해주세요.")
+  const title = page === 0 ? `${name} (M)` : `${name}${page} (S${mainId})`
   if (title.length > 45) throw new Error("최종 제목이 45자를 넘습니다. 세트명을 줄여주세요.")
   return title
 }

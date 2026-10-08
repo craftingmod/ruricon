@@ -5,6 +5,7 @@ import {
   compileSlave,
   imageHtml,
   readMain,
+  setNameLimit,
   setTitle,
   validateState,
   type IconSetState,
@@ -14,12 +15,19 @@ import { organizeImages, splitImages } from "./organizeImages.ts"
 export function parseSetTitle(title: string) {
   const main = title.trim().match(/^(.+?)\s+\(M\)$/)
   if (main) return { name: main[1].trim(), page: 0, slaveId: undefined }
-  const match = title.trim().match(/^(.+?)\s+#([1-9]\d*)(?:\s+\(S([0-9A-Z]+)\))?$/i)
-  if (match && Number.isSafeInteger(Number(match[2])))
+  const match = title.trim().match(/^(.+?)\s+#([1-9]\d*)(?:\s+\(S([1-9]\d*)\))?$/i)
+  if (
+    match &&
+    Number.isSafeInteger(Number(match[2])) &&
+    (match[3] === undefined || Number.isSafeInteger(Number(match[3])))
+  )
     return { name: match[1].trim(), page: Number(match[2]), slaveId: match[3] }
-  const slave = title.trim().match(/^(.+?)\s+\(S([0-9A-Z]+)\)$/i)
-  // The title identifies the master only; page order belongs to its state.
-  return slave ? { name: slave[1].trim(), page: 1, slaveId: slave[2] } : null
+  const slave = title.trim().match(/^(.+?)\s+\(S([1-9]\d*)(?:-([1-9]\d*))?\)$/i)
+  return slave &&
+    Number.isSafeInteger(Number(slave[2])) &&
+    (slave[3] === undefined || Number.isSafeInteger(Number(slave[3])))
+    ? { name: slave[1].trim(), page: Number(slave[3] ?? 1), slaveId: slave[2] }
+    : null
 }
 
 export class IconSetController {
@@ -36,6 +44,8 @@ export class IconSetController {
 
   constructor(readonly subject: HTMLInputElement) {
     const set = parseSetTitle(subject.value)
+    if (!set && /\(S[0-9A-Z]+(?:-[0-9A-Z]+)?\)$/i.test(subject.value.trim()))
+      throw new Error("분할 ID는 10진수 규약입니다. 기존 세트는 대표에서 다시 게시해주세요.")
     this.activePage = set?.page ?? 0
     this.main = this.activePage === 0 ? { html: "", slaves: this.pages } : null
     this.isSet = !!set
@@ -49,7 +59,7 @@ export class IconSetController {
           restored.state.mainArticleId !== null &&
           restored.state.mainArticleId !== this.mainArticleId
         )
-          throw new Error("Main 게시글 ID가 일치하지 않습니다.")
+          throw new Error("대표 게시글 ID가 일치하지 않습니다.")
         this.mainArticleId ??= restored.state.mainArticleId
         this.subject.value = restored.state.name
         for (const slave of restored.state.slaves) {
@@ -59,7 +69,10 @@ export class IconSetController {
         this.isSet = true
       } else if (set) this.subject.value = set.name
     } else if (set) this.subject.value = set.name
-    this.subject.maxLength = 38
+    this.subject.maxLength = setNameLimit(
+      this.mainArticleId ?? (set?.slaveId ? Number(set.slaveId) : null),
+      Math.max(1, this.activePage, ...this.pages.keys()),
+    )
     this.save()
   }
 
@@ -72,8 +85,14 @@ export class IconSetController {
     return html
   }
 
-  syncTitle() {
-    if (this.subject.value.trim().length > 38) throw new Error("세트명은 38자 이하로 입력해주세요.")
+  syncTitle(page = 0) {
+    const limit = setNameLimit(
+      this.mainArticleId,
+      Math.max(1, page, this.activePage, ...this.pages.keys()),
+    )
+    this.subject.maxLength = limit
+    if (this.subject.value.trim().length > limit)
+      throw new Error(`세트명은 ${limit}자 이하로 입력해주세요.`)
   }
 
   private replaceHtml(html: string, previous: string) {
@@ -94,9 +113,9 @@ export class IconSetController {
 
   selectPage(page: number) {
     if (!Number.isSafeInteger(page) || page < 0) throw new Error("페이지 번호를 확인해주세요.")
-    if (page === 0 && !this.main) throw new Error("이 화면에는 Main 본문이 없습니다.")
+    if (page === 0 && !this.main) throw new Error("이 화면에는 대표 본문이 없습니다.")
     if (this.publishing) throw new Error("게시 중에는 페이지를 전환할 수 없습니다.")
-    this.syncTitle()
+    this.syncTitle(page)
     const previous = this.restoreFailed ? this.getHtml(this.activePage) : this.save()
     const html = page === 0 ? this.getHtml(page) : organizeImages(this.getHtml(page), true)
     this.replaceHtml(html, previous)
@@ -125,7 +144,7 @@ export class IconSetController {
     const previous = this.save()
     const split = splitImages(previous)
     if (!split) return
-    this.syncTitle()
+    this.syncTitle(split.pages.length)
     this.replaceHtml(split.pages[0], previous)
     this.main.html = split.mainHtml
     split.pages.forEach((html, index) => this.pages.set(index + 1, html))
@@ -134,7 +153,8 @@ export class IconSetController {
   }
 
   snapshot(): IconSetState {
-    if (!this.main) throw new Error("Slave는 Main 편집 화면에서 수정해주세요.")
+    if (!this.main) throw new Error("분할은 대표 편집 화면에서 수정해주세요.")
+    this.syncTitle()
     this.save()
     const state: IconSetState = {
       version: 1,
@@ -164,7 +184,7 @@ export class IconSetController {
   ) {
     if (this.publishing) throw new Error("이미 게시 중입니다.")
     if (this.publishUncertain)
-      throw new Error("게시 결과가 불명확합니다. 게시판에서 확인한 뒤 Main 수정 화면을 열어주세요.")
+      throw new Error("게시 결과가 불명확합니다. 게시판에서 확인한 뒤 대표 수정 화면을 열어주세요.")
     if (!Number.isSafeInteger(category) || category < 1)
       throw new Error("게시글 분류를 선택해주세요.")
     const state = this.snapshot()
@@ -179,6 +199,11 @@ export class IconSetController {
           category,
           subject: setTitle(state.name, page, state.mainArticleId),
           content,
+          raw_tags: [
+            "ruricon",
+            page === 0 ? "ruriconM" : "ruriconS",
+            ...(state.mainArticleId === null ? [] : [`ruricon${state.mainArticleId}`]),
+          ],
         },
         id !== null,
       )
@@ -187,11 +212,11 @@ export class IconSetController {
         set_notify: set_notify ?? article.set_notify,
         is_spoiler: is_spoiler ?? article.is_spoiler,
         thumbnail_off: thumbnail_off ?? article.thumbnail_off,
-        tag_input: tag_input ?? article.tag_input,
+        tag_input: tag_input ? `${article.tag_input} ${tag_input}` : article.tag_input,
       })
       let result
       try {
-        const label = page === 0 ? "Main" : `Slave #${page}`
+        const label = page === 0 ? "대표" : `분할 #${page}`
         onProgress?.(`${label} ${id === null ? "생성" : "수정"} 중입니다.`)
         result = await writeArticle(article, {
           ...(id === null ? {} : { articleId: id }),
@@ -205,7 +230,7 @@ export class IconSetController {
       } catch {
         this.publishUncertain = true
         throw new Error(
-          "게시 응답을 받지 못했습니다. 게시판에서 결과를 확인한 뒤 Main 수정 화면을 열어주세요.",
+          "게시 응답을 받지 못했습니다. 게시판에서 결과를 확인한 뒤 대표 수정 화면을 열어주세요.",
         )
       }
       if (!result.success) throw new Error(result.reason || "게시 요청이 실패했습니다.")
@@ -227,7 +252,7 @@ export class IconSetController {
       } catch {
         this.publishUncertain = true
         throw new Error(
-          "게시 응답의 ID가 불명확합니다. 게시판에서 결과를 확인한 뒤 Main 수정 화면을 열어주세요.",
+          "게시 응답의 ID가 불명확합니다. 게시판에서 결과를 확인한 뒤 대표 수정 화면을 열어주세요.",
         )
       }
     }
@@ -237,6 +262,7 @@ export class IconSetController {
       if (state.mainArticleId === null) {
         this.mainArticleId = await post(compileMain(mainHtml, state), 0, null)
         state.mainArticleId = this.mainArticleId
+        this.subject.maxLength = setNameLimit(this.mainArticleId, Math.max(1, ...this.pages.keys()))
       }
       for (const slave of state.slaves) setTitle(state.name, slave.page, state.mainArticleId)
       for (const slave of state.slaves) {

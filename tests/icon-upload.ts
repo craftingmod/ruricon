@@ -61,11 +61,11 @@ async function check() {
   )
   assert(
     splitVideos.mainHtml.includes("movie.mp4") && !splitVideos.mainHtml.includes("?gif"),
-    "일반 mp4는 Main에 보관",
+    "일반 mp4는 대표에 보관",
   )
   for (const size of [101, Math.max(101, splitNum * 2), Math.max(101, splitNum * 2 + 1), 1454]) {
     const split = splitImages(`<p>세트 설명</p><p><br></p>${iconHtml(size)}`)!
-    assert(split.mainHtml === "<p>세트 설명</p>", "이미지 외 본문은 Main에 보관")
+    assert(split.mainHtml === "<p>세트 설명</p>", "이미지 외 본문은 대표에 보관")
     assert(split.pages.length === Math.ceil(size / splitNum), `${splitNum}개씩 페이지 생성`)
     const images = split.pages.flatMap((html, page) => {
       const doc = new DOMParser().parseFromString(html, "text/html")
@@ -96,11 +96,11 @@ async function check() {
   const onlyGridDoc = new DOMParser().parseFromString(imageGrid, "text/html")
   assert(
     onlyGridDoc.body.children.length === 1 && onlyGridDoc.body.textContent === "",
-    "Slave는 이미지 grid만 보관",
+    "분할은 이미지 grid만 보관",
   )
   assert(
-    organizeImages(plainVideo + "<p>이미지 없는 Slave</p>", true) === "",
-    "이미지가 없는 Slave는 빈 본문",
+    organizeImages(plainVideo + "<p>이미지 없는 분할</p>", true) === "",
+    "이미지가 없는 분할은 빈 본문",
   )
   const organizedDoc = new DOMParser().parseFromString(organized, "text/html")
   const grid = organizedDoc.body.lastElementChild!
@@ -138,10 +138,22 @@ async function check() {
     "이미지 주변 공백 문단 제거",
   )
   assert(parseSetTitle("냥냥콘 #2")?.page === 2, "번호 파싱")
-  assert(parseSetTitle("냥냥콘 (S1234)")?.slaveId === "1234", "번호 없는 Slave 표기 파싱")
-  assert(parseSetTitle("냥냥콘 (S1234)")?.name === "냥냥콘", "번호 없는 Slave 세트명")
-  assert(parseSetTitle("냥냥콘 (M)")?.page === 0, "Main 표기 파싱")
-  assert(parseSetTitle("냥냥콘 #2 (S1234)")?.slaveId === "1234", "36진수 Slave 표기 파싱")
+  assert(parseSetTitle("냥냥콘 (S1234)")?.slaveId === "1234", "번호 없는 분할 표기 파싱")
+  assert(parseSetTitle("냥냥콘 (S1234)")?.name === "냥냥콘", "번호 없는 분할 세트명")
+  assert(parseSetTitle("냥냥콘 (M)")?.page === 0, "대표 표기 파싱")
+  assert(parseSetTitle("냥냥콘 #2 (S1234)")?.slaveId === "1234", "10진수 분할 표기 파싱")
+  assert(parseSetTitle("냥냥콘 (S4989)")?.slaveId === "4989", "10진수 대표 ID 그대로 파싱")
+  assert(
+    parseSetTitle("냥냥콘 (S4989-12)")?.page === 12 &&
+      parseSetTitle("냥냥콘 (S4989-12)")?.slaveId === "4989",
+    "대표 ID와 분할 index 파싱",
+  )
+  assert(parseSetTitle("냥냥콘 (S4989-0)") === null, "0번 index 거부")
+  assert(
+    parseSetTitle("냥냥콘12 (S4989)")?.slaveId === "4989",
+    "세트명 뒤 index 제목의 대표 ID 파싱",
+  )
+  assert(parseSetTitle("냥냥콘 (S22E)") === null, "36진수 제목을 새 규약으로 해석하지 않음")
   for (const title of [
     "기존 제목",
     "#2",
@@ -181,15 +193,34 @@ async function check() {
       source.value = html
     },
   }
-  body.innerHTML = "<p>Main 설명</p>"
+  body.innerHTML = "<p>대표 설명</p>"
   await settle()
   const controller = root.controller!
+  const rawSubmit = document.querySelector<HTMLElement>("#write_submit")!
+  const bundle = document.querySelector<HTMLButtonElement>(".ruricon-bundle-submit")!
+  assert(
+    bundle.hidden && rawSubmit.innerHTML === "등록" && rawSubmit.style.opacity === "",
+    "단일 페이지는 기존 등록 표시",
+  )
+  assert(
+    bundle.className === "ruricon-bundle-submit" && rawSubmit.className === "site-yellow-button",
+    "커스텀 버튼 클래스만 사용",
+  )
   controller.addPage()
   controller.addPage()
   controller.pages.delete(1)
   body.innerHTML = "<p>첫 번째 본문</p>" + iconHtml(101)
   await settle()
   assert(controller && controller.activePage === 2, "root controller 생성")
+  assert(
+    !bundle.hidden && rawSubmit.innerHTML === "Raw 등록" && rawSubmit.style.opacity === "0.4",
+    "세트 구성 시 묶음 등록 표시",
+  )
+  assert(
+    getComputedStyle(bundle).backgroundColor === "rgb(255, 255, 255)" &&
+      getComputedStyle(bundle).color === "rgb(36, 86, 156)",
+    "흰 배경과 파란 글자 커스텀 스타일",
+  )
   const count = () => root.querySelector(".ruricon-upload-count")!.textContent
   const next = root.querySelector<HTMLButtonElement>(".ruricon-set-next")!
   assert(count() === "101 / 100", "seditor 본문 개수")
@@ -287,11 +318,11 @@ async function check() {
   const retry = retryRoot.controller!
   assert(
     retry.isSet && retry.activePage === 1 && retry.pages.size === Math.ceil(181 / splitNum),
-    "분할 후 세트 및 첫 Slave 활성화",
+    "분할 후 세트 및 첫 분할 활성화",
   )
   assert(
     retry.main!.html === "<p>세트 설명</p>" && String(subject.value) === "분할 테스트",
-    "Main 보관 및 세트명 유지",
+    "대표 보관 및 세트명 유지",
   )
   assert(
     retryRoot.querySelector<HTMLButtonElement>(".ruricon-split")!.hidden,
@@ -331,7 +362,7 @@ async function check() {
   )
   assert(
     videoRoot.controller!.main!.html.includes("movie.mp4"),
-    "버튼 분할 시 일반 영상은 Main에 보관",
+    "버튼 분할 시 일반 영상은 대표에 보관",
   )
   videoCleanup()
   subject.value = ""
@@ -343,13 +374,13 @@ async function check() {
   assert(!blankNext.disabled, "빈 제목에서도 #1 시작 활성화")
   blankNext.click()
   await settle()
-  assert(blankRoot.controller!.isSet && seditor.getHtml() === "", "세트 시작 시 빈 #1 Slave")
-  assert(blankRoot.controller!.main?.html === draft, "현 Context는 Main으로 보관")
+  assert(blankRoot.controller!.isSet && seditor.getHtml() === "", "세트 시작 시 빈 #1 분할")
+  assert(blankRoot.controller!.main?.html === draft, "현 Context는 대표로 보관")
   assert(
     blankRoot.controller!.main?.slaves === blankRoot.controller!.pages,
-    "Main이 Slave 정보 참조",
+    "대표가 분할 정보 참조",
   )
-  body.innerHTML = "<p>첫 Slave 본문</p>" + iconHtml(1)
+  body.innerHTML = "<p>첫 분할 본문</p>" + iconHtml(1)
   await settle()
   const slaveHtml = organizeImages(seditor.getHtml(), true)
   blankNext.click()
@@ -366,13 +397,13 @@ async function check() {
   await settle()
   assert(
     seditor.getHtml() === draft && String(subject.value) === "새 제목",
-    "Main 본문 및 제목 복원",
+    "대표 본문 및 제목 복원",
   )
   blankRoot.querySelector<HTMLButtonElement>('[data-page="1"]')!.click()
   await settle()
   assert(
     seditor.getHtml() === slaveHtml && String(subject.value) === "새 제목",
-    "첫 Slave 별도 복원",
+    "첫 분할 별도 복원",
   )
   blankRoot.controller!.selectPage(0)
   blankRoot.controller!.selectPage(1)
@@ -381,9 +412,9 @@ async function check() {
   subject.value = "기존 세트 (M)"
   seditor.setHtml(draft)
   const resumed = new IconSetController(subject)
-  assert(resumed.activePage === 0 && resumed.main?.html === draft, "기존 Main 제목으로 초기화")
+  assert(resumed.activePage === 0 && resumed.main?.html === draft, "기존 대표 제목으로 초기화")
   subject.value = "냥냥콘"
-  seditor.setHtml("<p>Main 세트 설명</p>")
+  seditor.setHtml("<p>대표 세트 설명</p>")
   mountIconUpload()
   const preview = document.querySelector<IconUploadRoot>(".ruricon-upload")!.controller!
   preview.addPage()
@@ -392,7 +423,7 @@ async function check() {
   seditor.setHtml("<p>2페이지</p>" + "<img>".repeat(87))
   await settle()
   document.querySelector("#result")!.textContent =
-    `PASS · Slave 전환 grid, 접미사 없는 세트명, Main 보존, GIF 치환, ${splitNum}개 분할, 실패 보호`
+    `PASS · 분할 전환 grid, 접미사 없는 세트명, 대표 보존, GIF 치환, ${splitNum}개 분할, 실패 보호`
 }
 
 void check().catch((error: unknown) => {
