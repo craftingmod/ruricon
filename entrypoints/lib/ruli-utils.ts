@@ -1,19 +1,19 @@
 import { getEditUrl, getViewUrl } from "./ruli-constants.ts"
 
 export interface Article {
-  board_id: number,
-  cate: "" | number, // Use on modify (should be same as category)
-  hasimage: number, // Image count (or hookable?)
-  action: "proc",
-  subject: string, // Title
-  subject_limit: 45, // Hardcoded
-  category: number, // Internal category
-  file: "", // Unused
-  content: string, // HTML
-  tag_input: "",
-  set_notify: 0 | 1,
-  is_spoiler: 0 | 1,
-  thumbnail_off: 0 | 1,
+  board_id: number
+  cate: "" | number // Use on modify (should be same as category)
+  hasimage: number // Image count (or hookable?)
+  action: "proc"
+  subject: string // Title
+  subject_limit: 45 // Hardcoded
+  category: number // Internal category
+  file: "" // Unused
+  content: string // HTML
+  tag_input: ""
+  set_notify: 0 | 1
+  is_spoiler: 0 | 1
+  thumbnail_off: 0 | 1
   content_image_meta: "{}"
 }
 
@@ -26,8 +26,10 @@ export function toStringMap<T extends object>(record: T): Record<keyof T, string
   return kvPair
 }
 
-export function createArticle(articleParam: Pick<Article, 
-  "board_id" | "subject" | "category" | "content">, modify = false): Article {
+export function createArticle(
+  articleParam: Pick<Article, "board_id" | "subject" | "category" | "content">,
+  modify = false,
+): Article {
   return {
     ...articleParam,
     cate: modify ? articleParam.category : "",
@@ -54,8 +56,10 @@ export async function readArticle(boardId: number, articleId: number, isMobile =
 
   const domParser = new DOMParser()
   const dom = domParser.parseFromString(await viewRequest.text(), "text/html")
-  
-  const contentDiv = dom.querySelector(".board_main > .board_main_view .view_content > article > div")
+
+  const contentDiv = dom.querySelector(
+    ".board_main > .board_main_view .view_content > article > div",
+  )
   if (contentDiv == null) {
     return {
       success: false,
@@ -85,65 +89,89 @@ export function parseArticleURL(rawURL: string) {
   }
 }
 
-export async function writeArticle(article: Article, options: Partial<{
-  articleId: number,
-  isMobile: boolean,
-}> = {}): Promise<{
-  success: boolean,
-  url: string,
-  reason: string,
+// shortcut: this page tracks its own writes; share the cooldown when cross-tab coordination is needed.
+let nextWriteAt = 0
+let pendingWrites = Promise.resolve()
+
+export async function writeArticle(
+  article: Article,
+  options: Partial<{
+    articleId: number
+    isMobile: boolean
+    onWait: (seconds: number) => void
+  }> = {},
+): Promise<{
+  success: boolean
+  url: string
+  reason: string
 }> {
-  const postfix = options.articleId != null ? `modify/${options.articleId}` : "write"
-  const requestURL = getEditUrl(
-    options.isMobile ?? false,
-    article.board_id,
-    postfix
-  )
-
-  const articleBody = new URLSearchParams(
-    toStringMap(article)
-  )
-
-  const writeRequest = await fetch(requestURL, {
-    method: "POST",
-    mode: "cors",
-    redirect: "follow",
-    body: articleBody,
-  })
-  console.log(writeRequest.status)
-  const responseText = await writeRequest.text()
-
-  if (writeRequest.redirected) {
-    // Success
-    return {
-      success: true,
-      url: writeRequest.url,
-      reason: "",
+  let release: (() => void) | undefined
+  if (options.articleId == null) {
+    const previous = pendingWrites
+    pendingWrites = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await previous
+  }
+  try {
+    if (release) {
+      while (Date.now() < nextWriteAt) {
+        options.onWait?.(Math.ceil((nextWriteAt - Date.now()) / 1000))
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(1000, nextWriteAt - Date.now())),
+        )
+      }
+      options.onWait?.(0)
     }
-  }
+    const postfix = options.articleId != null ? `modify/${options.articleId}` : "write"
+    const requestURL = getEditUrl(options.isMobile ?? false, article.board_id, postfix)
 
-  // Fail
-  let errorReason = responseText.match(/<p class="desc">.*?<\/p>/)?.[0] ?? ""
+    const articleBody = new URLSearchParams(toStringMap(article))
 
-  if (errorReason.length > 20) {
-    errorReason = errorReason.substring(16, errorReason.length - 4)
-  } else {
-    errorReason = responseText
-  }
+    const writeRequest = await fetch(requestURL, {
+      method: "POST",
+      mode: "cors",
+      redirect: "follow",
+      body: articleBody,
+    })
+    console.log(writeRequest.status)
+    const responseText = await writeRequest.text()
 
-  return {
-    success: false,
-    url: writeRequest.url,
-    reason: errorReason,
+    if (writeRequest.redirected) {
+      // Success
+      return {
+        success: true,
+        url: writeRequest.url,
+        reason: "",
+      }
+    }
+
+    // Fail
+    let errorReason = responseText.match(/<p class="desc">.*?<\/p>/)?.[0] ?? ""
+
+    if (errorReason.length > 20) {
+      errorReason = errorReason.substring(16, errorReason.length - 4)
+    } else {
+      errorReason = responseText
+    }
+
+    return {
+      success: false,
+      url: writeRequest.url,
+      reason: errorReason,
+    }
+  } finally {
+    if (release) {
+      // Count from response completion, with five seconds beyond the site's 30-second limit.
+      nextWriteAt = Date.now() + 35_000
+      release()
+    }
   }
 }
 
-const MAX_TITLE_LENGTH = 45;
+const MAX_TITLE_LENGTH = 45
 
-function createSegmentTitle(
-  title: string,
-  mainId: number,
-): string {
-  const suffix = ` (S${mainId.toString(36).toUpperCase()})`;
-  return title.slice(0, MAX_TITLE_LENGTH - suffix.length) + suffix;
+function createSegmentTitle(title: string, mainId: number): string {
+  const suffix = ` (S${mainId.toString(36).toUpperCase()})`
+  return title.slice(0, MAX_TITLE_LENGTH - suffix.length) + suffix
 }

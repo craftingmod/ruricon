@@ -138,6 +138,8 @@ async function check() {
     "이미지 주변 공백 문단 제거",
   )
   assert(parseSetTitle("냥냥콘 #2")?.page === 2, "번호 파싱")
+  assert(parseSetTitle("냥냥콘 (S1234)")?.slaveId === "1234", "번호 없는 Slave 표기 파싱")
+  assert(parseSetTitle("냥냥콘 (S1234)")?.name === "냥냥콘", "번호 없는 Slave 세트명")
   assert(parseSetTitle("냥냥콘 (M)")?.page === 0, "Main 표기 파싱")
   assert(parseSetTitle("냥냥콘 #2 (S1234)")?.slaveId === "1234", "36진수 Slave 표기 파싱")
   for (const title of [
@@ -179,9 +181,14 @@ async function check() {
       source.value = html
     },
   }
-  body.innerHTML = "<p>첫 번째 본문</p>" + iconHtml(101)
+  body.innerHTML = "<p>Main 설명</p>"
   await settle()
   const controller = root.controller!
+  controller.addPage()
+  controller.addPage()
+  controller.pages.delete(1)
+  body.innerHTML = "<p>첫 번째 본문</p>" + iconHtml(101)
+  await settle()
   assert(controller && controller.activePage === 2, "root controller 생성")
   const count = () => root.querySelector(".ruricon-upload-count")!.textContent
   const next = root.querySelector<HTMLButtonElement>(".ruricon-set-next")!
@@ -194,7 +201,7 @@ async function check() {
   next.click()
   await settle()
   assert(controller.pages.get(2) === firstHtml, "전환 전 HTML 보관")
-  assert(subject.value === "냥냥콘 #3" && seditor.getHtml() === "", "빈 새 페이지")
+  assert(subject.value === "냥냥콘" && seditor.getHtml() === "", "빈 새 페이지")
   body.innerHTML = "<p>두 번째 본문</p>" + iconHtml(2)
   await settle()
   const secondHtml = organizeImages(seditor.getHtml(), true)
@@ -215,10 +222,9 @@ async function check() {
     root.querySelector(".ruricon-upload-notice")!.textContent === "",
     "일반 업로드 정책 문구 제거",
   )
-  subject.value = "냥냥콘 #3"
-  subject.dispatchEvent(new Event("change", { bubbles: true }))
+  root.querySelector<HTMLButtonElement>('[data-page="3"]')!.click()
   await settle()
-  assert(seditor.getHtml() === secondHtml && count() === "2 / 100", "제목 번호로 전환")
+  assert(seditor.getHtml() === secondHtml && count() === "2 / 100", "페이지 버튼으로 전환")
   source.hidden = false
   source.value = "<p>HTML 모드 수정</p>" + iconHtml(1)
   source.dispatchEvent(new Event("input", { bubbles: true }))
@@ -284,8 +290,8 @@ async function check() {
     "분할 후 세트 및 첫 Slave 활성화",
   )
   assert(
-    retry.main!.html === "<p>세트 설명</p>" && String(subject.value) === "분할 테스트 #1",
-    "Main 보관 및 제목 전환",
+    retry.main!.html === "<p>세트 설명</p>" && String(subject.value) === "분할 테스트",
+    "Main 보관 및 세트명 유지",
   )
   assert(
     retryRoot.querySelector<HTMLButtonElement>(".ruricon-split")!.hidden,
@@ -355,39 +361,22 @@ async function check() {
   subject.value = "새 제목"
   subject.dispatchEvent(new Event("change", { bubbles: true }))
   await settle()
-  assert(String(subject.value) === "새 제목 #2", "나중에 입력한 제목에 활성 번호 적용")
+  assert(String(subject.value) === "새 제목", "세트명 편집 시 접미사를 붙이지 않음")
   blankRoot.querySelector<HTMLButtonElement>('[data-page="0"]')!.click()
   await settle()
   assert(
-    seditor.getHtml() === draft && String(subject.value) === "새 제목 (M)",
+    seditor.getHtml() === draft && String(subject.value) === "새 제목",
     "Main 본문 및 제목 복원",
   )
   blankRoot.querySelector<HTMLButtonElement>('[data-page="1"]')!.click()
   await settle()
   assert(
-    seditor.getHtml() === slaveHtml && String(subject.value) === "새 제목 #1",
+    seditor.getHtml() === slaveHtml && String(subject.value) === "새 제목",
     "첫 Slave 별도 복원",
   )
-  subject.value = "새 제목 #1 (S1234)"
-  subject.dispatchEvent(new Event("change", { bubbles: true }))
-  await settle()
   blankRoot.controller!.selectPage(0)
-  assert(String(subject.value) === "새 제목 (M)", "Main은 Slave ID 대신 (M) 표기")
   blankRoot.controller!.selectPage(1)
-  await settle()
-  assert(String(subject.value) === "새 제목 #1 (S1234)", "Main 왕복 후 Slave ID 유지")
-  body.innerHTML = "<p>Slave 설명 제거</p>" + gifVideo + plainVideo
-  subject.value = "새 제목 #4 (S1234)"
-  subject.dispatchEvent(new Event("change", { bubbles: true }))
-  await settle()
-  const renamedSlave = new DOMParser().parseFromString(seditor.getHtml(), "text/html")
-  assert(
-    blankRoot.controller!.activePage === 4 &&
-      renamedSlave.body.children.length === 1 &&
-      !renamedSlave.querySelector("video") &&
-      renamedSlave.body.textContent === "",
-    "Slave 번호 변경도 grid 강제 정리",
-  )
+  assert(String(subject.value) === "새 제목", "페이지 전환은 세트명을 변경하지 않음")
   blankCleanup()
   subject.value = "기존 세트 (M)"
   seditor.setHtml(draft)
@@ -403,7 +392,7 @@ async function check() {
   seditor.setHtml("<p>2페이지</p>" + "<img>".repeat(87))
   await settle()
   document.querySelector("#result")!.textContent =
-    `PASS · Slave 전환·번호 변경 grid 강제, Main 보존, GIF 치환, ${splitNum}개 분할, 실패 보호`
+    `PASS · Slave 전환 grid, 접미사 없는 세트명, Main 보존, GIF 치환, ${splitNum}개 분할, 실패 보호`
 }
 
 void check().catch((error: unknown) => {

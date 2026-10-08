@@ -1,18 +1,35 @@
+import { iconBoardId } from "../ruli-constants.ts"
+import { createArticle, parseArticleURL, writeArticle, type Article } from "../ruli-utils.ts"
+import {
+  compileMain,
+  compileSlave,
+  imageHtml,
+  readMain,
+  setTitle,
+  validateState,
+  type IconSetState,
+} from "./articleMeta.ts"
 import { organizeImages, splitImages } from "./organizeImages.ts"
 
 export function parseSetTitle(title: string) {
   const main = title.trim().match(/^(.+?)\s+\(M\)$/)
   if (main) return { name: main[1].trim(), page: 0, slaveId: undefined }
   const match = title.trim().match(/^(.+?)\s+#([1-9]\d*)(?:\s+\(S([0-9A-Z]+)\))?$/i)
-  if (!match || !Number.isSafeInteger(Number(match[2]))) return null
-  return { name: match[1].trim(), page: Number(match[2]), slaveId: match[3] }
+  if (match && Number.isSafeInteger(Number(match[2])))
+    return { name: match[1].trim(), page: Number(match[2]), slaveId: match[3] }
+  const slave = title.trim().match(/^(.+?)\s+\(S([0-9A-Z]+)\)$/i)
+  // The title identifies the master only; page order belongs to its state.
+  return slave ? { name: slave[1].trim(), page: 1, slaveId: slave[2] } : null
 }
 
 export class IconSetController {
   // ponytail: page drafts live in memory; add persistence when reload recovery is needed.
   readonly pages = new Map<number, string>()
   readonly main: { html: string; slaves: Map<number, string> } | null
-  private slaveId: string | undefined
+  mainArticleId: number | null = null
+  readonly articleIds = new Map<number, number>()
+  publishing = false
+  private publishUncertain = false
   activePage: number
   isSet: boolean
   private restoreFailed = false
@@ -21,8 +38,28 @@ export class IconSetController {
     const set = parseSetTitle(subject.value)
     this.activePage = set?.page ?? 0
     this.main = this.activePage === 0 ? { html: "", slaves: this.pages } : null
-    this.slaveId = set?.slaveId
     this.isSet = !!set
+    if (this.main) {
+      const restored = readMain(seditor.getHtml())
+      const match = location.pathname.match(/^\/community\/board\/98\/modify\/(\d+)\/?$/)
+      this.mainArticleId = match ? Number(match[1]) : null
+      if (restored.state) {
+        if (
+          this.mainArticleId !== null &&
+          restored.state.mainArticleId !== null &&
+          restored.state.mainArticleId !== this.mainArticleId
+        )
+          throw new Error("Main 게시글 ID가 일치하지 않습니다.")
+        this.mainArticleId ??= restored.state.mainArticleId
+        this.subject.value = restored.state.name
+        for (const slave of restored.state.slaves) {
+          this.pages.set(slave.page, imageHtml(slave.images))
+          if (slave.articleId !== null) this.articleIds.set(slave.page, slave.articleId)
+        }
+        this.isSet = true
+      } else if (set) this.subject.value = set.name
+    } else if (set) this.subject.value = set.name
+    this.subject.maxLength = 38
     this.save()
   }
 
@@ -36,46 +73,7 @@ export class IconSetController {
   }
 
   syncTitle() {
-    const set = parseSetTitle(this.subject.value)
-    if (!set) {
-      if (this.isSet && this.subject.value.trim()) this.writeTitle(this.pageTitle(this.activePage))
-      return
-    }
-    const page = set.page
-    this.slaveId = set.slaveId ?? this.slaveId
-    this.isSet = true
-    if (page === this.activePage) return
-    if (page === 0 || this.activePage === 0 || this.pages.has(page)) {
-      this.selectPage(page)
-    } else {
-      const previous = this.save()
-      const html = organizeImages(previous, true)
-      this.replaceHtml(html, previous)
-      this.pages.delete(this.activePage)
-      this.pages.set(page, html)
-      this.activePage = page
-    }
-  }
-
-  private pageTitle(page: number) {
-    if (!Number.isSafeInteger(page) || page < 0) throw new Error("페이지 번호를 확인해주세요.")
-    const name = parseSetTitle(this.subject.value)?.name ?? this.subject.value.trim()
-    if (!name) return ""
-    const title =
-      page === 0 ? `${name} (M)` : `${name} #${page}${this.slaveId ? ` (S${this.slaveId})` : ""}`
-    const limit =
-      this.subject.maxLength >= 0
-        ? this.subject.maxLength
-        : Number(document.querySelector<HTMLInputElement>('input[name="subject_limit"]')?.value) ||
-          45
-    if (title.length > limit) throw new Error("페이지 번호를 붙일 수 있도록 제목을 줄여주세요.")
-    return title
-  }
-
-  private writeTitle(title: string) {
-    this.subject.value = title
-    this.subject.dispatchEvent(new Event("input", { bubbles: true }))
-    this.subject.dispatchEvent(new Event("change", { bubbles: true }))
+    if (this.subject.value.trim().length > 38) throw new Error("세트명은 38자 이하로 입력해주세요.")
   }
 
   private replaceHtml(html: string, previous: string) {
@@ -95,8 +93,10 @@ export class IconSetController {
   }
 
   selectPage(page: number) {
+    if (!Number.isSafeInteger(page) || page < 0) throw new Error("페이지 번호를 확인해주세요.")
     if (page === 0 && !this.main) throw new Error("이 화면에는 Main 본문이 없습니다.")
-    const title = this.pageTitle(page)
+    if (this.publishing) throw new Error("게시 중에는 페이지를 전환할 수 없습니다.")
+    this.syncTitle()
     const previous = this.restoreFailed ? this.getHtml(this.activePage) : this.save()
     const html = page === 0 ? this.getHtml(page) : organizeImages(this.getHtml(page), true)
     this.replaceHtml(html, previous)
@@ -105,7 +105,6 @@ export class IconSetController {
     else this.pages.set(page, html)
     this.activePage = page
     this.isSet = true
-    this.writeTitle(title)
   }
 
   addPage() {
@@ -126,14 +125,134 @@ export class IconSetController {
     const previous = this.save()
     const split = splitImages(previous)
     if (!split) return
-    this.pageTitle(split.pages.length)
-    const title = this.pageTitle(1)
+    this.syncTitle()
     this.replaceHtml(split.pages[0], previous)
     this.main.html = split.mainHtml
     split.pages.forEach((html, index) => this.pages.set(index + 1, html))
     this.activePage = 1
     this.isSet = true
-    this.writeTitle(title)
+  }
+
+  snapshot(): IconSetState {
+    if (!this.main) throw new Error("Slave는 Main 편집 화면에서 수정해주세요.")
+    this.save()
+    const state: IconSetState = {
+      version: 1,
+      name: this.subject.value.trim(),
+      boardId: iconBoardId,
+      mainArticleId: this.mainArticleId,
+      slaves: [...this.pages]
+        .sort(([a], [b]) => a - b)
+        .map(([page, html]) => ({
+          page,
+          articleId: this.articleIds.get(page) ?? null,
+          images: [
+            ...new DOMParser()
+              .parseFromString(organizeImages(html, true), "text/html")
+              .querySelectorAll("img[src]"),
+          ].map((image) => image.getAttribute("src")!),
+        })),
+    }
+    validateState(state)
+    return state
+  }
+
+  async publish(
+    category: number,
+    settings: Partial<Article> = {},
+    onProgress?: (message: string) => void,
+  ) {
+    if (this.publishing) throw new Error("이미 게시 중입니다.")
+    if (this.publishUncertain)
+      throw new Error("게시 결과가 불명확합니다. 게시판에서 확인한 뒤 Main 수정 화면을 열어주세요.")
+    if (!Number.isSafeInteger(category) || category < 1)
+      throw new Error("게시글 분류를 선택해주세요.")
+    const state = this.snapshot()
+    const mainHtml = readMain(this.main!.html).html
+    setTitle(state.name, 0, state.mainArticleId)
+    // Check known title lengths before init; check the actual new ID before posting Slaves.
+    for (const slave of state.slaves) setTitle(state.name, slave.page, state.mainArticleId ?? 1)
+    const post = async (content: string, page: number, id: number | null) => {
+      const article = createArticle(
+        {
+          board_id: iconBoardId,
+          category,
+          subject: setTitle(state.name, page, state.mainArticleId),
+          content,
+        },
+        id !== null,
+      )
+      const { set_notify, is_spoiler, thumbnail_off, tag_input } = settings
+      Object.assign(article, {
+        set_notify: set_notify ?? article.set_notify,
+        is_spoiler: is_spoiler ?? article.is_spoiler,
+        thumbnail_off: thumbnail_off ?? article.thumbnail_off,
+        tag_input: tag_input ?? article.tag_input,
+      })
+      let result
+      try {
+        const label = page === 0 ? "Main" : `Slave #${page}`
+        onProgress?.(`${label} ${id === null ? "생성" : "수정"} 중입니다.`)
+        result = await writeArticle(article, {
+          ...(id === null ? {} : { articleId: id }),
+          onWait: (seconds) =>
+            onProgress?.(
+              seconds > 0
+                ? `${label} 생성까지 ${seconds}초 대기 중입니다. (새 글 간격 35초)`
+                : `${label} 생성 중입니다.`,
+            ),
+        })
+      } catch {
+        this.publishUncertain = true
+        throw new Error(
+          "게시 응답을 받지 못했습니다. 게시판에서 결과를 확인한 뒤 Main 수정 화면을 열어주세요.",
+        )
+      }
+      if (!result.success) throw new Error(result.reason || "게시 요청이 실패했습니다.")
+      try {
+        const parsed = parseArticleURL(result.url)
+        if (
+          parsed.boardId !== iconBoardId ||
+          !Number.isSafeInteger(parsed.articleId) ||
+          parsed.articleId < 1 ||
+          (id !== null && parsed.articleId !== id) ||
+          (page > 0 &&
+            (parsed.articleId === state.mainArticleId ||
+              [...this.articleIds].some(
+                ([otherPage, otherId]) => otherPage !== page && otherId === parsed.articleId,
+              )))
+        )
+          throw new Error("게시 응답의 ID를 확인할 수 없습니다.")
+        return parsed.articleId
+      } catch {
+        this.publishUncertain = true
+        throw new Error(
+          "게시 응답의 ID가 불명확합니다. 게시판에서 결과를 확인한 뒤 Main 수정 화면을 열어주세요.",
+        )
+      }
+    }
+    this.publishing = true
+    this.isSet = true
+    try {
+      if (state.mainArticleId === null) {
+        this.mainArticleId = await post(compileMain(mainHtml, state), 0, null)
+        state.mainArticleId = this.mainArticleId
+      }
+      for (const slave of state.slaves) setTitle(state.name, slave.page, state.mainArticleId)
+      for (const slave of state.slaves) {
+        slave.articleId = await post(
+          compileSlave(slave.images, state.mainArticleId!),
+          slave.page,
+          slave.articleId,
+        )
+        this.articleIds.set(slave.page, slave.articleId)
+      }
+      await post(compileMain(mainHtml, state), 0, state.mainArticleId)
+      this.isSet = true
+      return state.mainArticleId
+    } finally {
+      this.publishing = false
+    }
   }
 
   getHtml(page: number) {
