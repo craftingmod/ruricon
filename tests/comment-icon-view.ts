@@ -131,6 +131,12 @@ async function choose(name: string, parent: ParentNode = document.querySelector(
   click("dialog .ruricon-preset-list button")
   await tick()
 }
+function enableEditMode(parent: ParentNode) {
+  click(".ruricon-icon-tabs button:nth-child(2)", parent)
+  if (parent.querySelector(".ruricon-icon-edit-mode")!.getAttribute("aria-pressed") !== "true")
+    click(".ruricon-icon-edit-mode", parent)
+  click(".ruricon-icon-tabs button:first-child", parent)
+}
 async function check() {
   assert(getLastId("app.icon_data_show(this, 5033);") === 5033, "Numeric ID isn't truncated")
   assert(getLastId("app.icon_data_show(this, '5033');") === 5033, "Quoted ID")
@@ -227,6 +233,11 @@ async function check() {
     "Page buttons precede grid",
   )
   assert(requests.filter((url) => url.includes("/read/")).length === 1, "No eager N+1 reads")
+  assert(
+    getComputedStyle(comment.querySelector(".ruricon-icon-star")!).display === "none",
+    "Favorite buttons are hidden by default",
+  )
+  enableEditMode(comment)
   click(".ruricon-icon-pages button:last-child", comment)
   assert(
     comment.querySelectorAll(".ruricon-icon-grid img").length === 1,
@@ -335,6 +346,51 @@ async function check() {
   assert(comment.querySelectorAll(".ruricon-icon-grid img").length === 5, "Last partial fetch page")
   click(".ruricon-icon-pages button:first-child", comment)
   assert(comment.querySelectorAll(".ruricon-icon-grid img").length === 100, "Back to cached page")
+  const originalImages = [...scrollingGrid.querySelectorAll<HTMLImageElement>("img")]
+  const favoriteTiles = originalImages
+    .slice(1, 3)
+    .map((image) => image.closest<HTMLElement>(".ruricon-icon-tile")!)
+  for (const favoriteTile of [...favoriteTiles].reverse()) click(".ruricon-icon-star", favoriteTile)
+  const orderedSources = () =>
+    [...scrollingGrid.querySelectorAll<HTMLImageElement>("img")].map((image) => image.src)
+  assert(
+    orderedSources().join(",") ===
+      [...originalImages.slice(1, 3), originalImages[0], ...originalImages.slice(3)]
+        .map((image) => image.src)
+        .join(","),
+    "Favorites come first while preserving original order within both groups",
+  )
+  for (const favoriteTile of favoriteTiles) {
+    const insertButton = favoriteTile.querySelector<HTMLElement>(".ruricon-icon-insert")!
+    const border = getComputedStyle(insertButton)
+    assert(
+      border.borderColor === "rgb(233, 163, 35)" && border.borderWidth === "2px",
+      "Favorite icon has an amber border",
+    )
+    assert(
+      insertButton.offsetWidth === 100 && insertButton.offsetHeight === 100,
+      "Favorite border preserves tile size",
+    )
+  }
+  click(".ruricon-icon-pages button:nth-child(2)", comment)
+  click(".ruricon-icon-pages button:first-child", comment)
+  assert(orderedSources()[0] === originalImages[1].src, "Loading a page puts saved favorites first")
+  for (const image of originalImages.slice(1, 3)) {
+    const favoriteTile = [
+      ...scrollingGrid.querySelectorAll<HTMLElement>(".ruricon-icon-tile"),
+    ].find((item) => item.querySelector<HTMLImageElement>("img")!.src === image.src)!
+    click(".ruricon-icon-star", favoriteTile)
+  }
+  assert(
+    orderedSources().join(",") === originalImages.map((image) => image.src).join(","),
+    "Removing favorites restores original order",
+  )
+  assert(
+    getComputedStyle(
+      scrollingGrid.querySelector('.ruricon-icon-tile[data-recent="false"] .ruricon-icon-insert')!,
+    ).borderWidth === "1px",
+    "Normal icons retain their original border",
+  )
   await choose("분할만")
   assert(
     requests.some((url) => url.endsWith("/read/920")),
@@ -358,6 +414,12 @@ async function check() {
   const reply = document.querySelector("#reply")!
   click("button[onclick]", reply)
   await tick()
+  enableEditMode(reply)
+  assert(
+    reply.querySelector(".ruricon-icon-view")!.getAttribute("data-edit-mode") === "true" &&
+      comment.querySelector(".ruricon-icon-view")!.getAttribute("data-edit-mode") === "true",
+    "Comment and reply share edit mode",
+  )
   const mobileGrid = reply.querySelector<HTMLElement>(".ruricon-icon-grid")!
   assert(mobileGrid.scrollWidth <= mobileGrid.clientWidth, "Narrow reply grid fits horizontally")
   for (const pressed of ["true", "false"]) {
@@ -456,7 +518,10 @@ async function check() {
   if (location.hostname === "m.ruliweb.com") {
     ;(reply as HTMLElement).style.maxWidth = "240px"
     assert(!shortcutRow.querySelector(".ruricon-preset-arrow"), "Mobile has no page arrows")
-    assert(strip.children.length === 5, "Mobile shows all shortcuts in one strip")
+    assert(
+      strip.children.length === (await loadPresets()).length,
+      "Mobile shows all shortcuts in one strip",
+    )
     assert(strip.scrollWidth > strip.clientWidth, "Mobile strip scrolls horizontally")
     strip.scrollLeft = strip.scrollWidth
     assert(strip.scrollLeft > 0, "Mobile strip can scroll")
@@ -520,7 +585,8 @@ async function check() {
     "Shortcut reuses collection loading",
   )
   const presets = await loadPresets()
-  assert(presets.length === 5, "M/S favorites collapse into one preset; ads excluded")
+  assert(presets.length === 7, "M/S favorites collapse into one preset; ads retained")
+  assert(presets.at(-2)?.id === 1917 && presets.at(-1)?.id === 3213, "Ad presets move to the end")
   assert(!presets.some((preset) => preset.id === 901), "Slave doesn't duplicate Main")
   const before = requests.length
   await Promise.all([loadCollection(presets[0]), loadCollection(presets[0])])
@@ -545,6 +611,7 @@ async function check() {
   const cleanupLimits = mountLimits()
   click("button[onclick]", comment)
   await tick()
+  enableEditMode(comment)
   const localPages = comment.querySelector<HTMLElement>(".ruricon-icon-pages")!
   for (const tabIndex of [2, 3]) {
     click(`.ruricon-icon-tabs button:nth-child(${tabIndex})`, comment)
@@ -624,6 +691,216 @@ async function check() {
       !document.querySelector(".ruricon-icon-view, dialog"),
     "Unmount ignores late insertion completion",
   )
+  const recentSet = [
+    source(777, 0),
+    source(902, 0),
+    ...Array.from({ length: 11 }, (_, index) => source(901, index + 20)),
+  ]
+  localStorage.setItem(
+    "ruricon:icon-view:v1",
+    JSON.stringify({
+      presetId: 900,
+      favorites: [source(901, 25), source(901, 50)],
+      recent: recentSet,
+    }),
+  )
+  const { mountCommentIconHook: mountRecent } = await import(
+    new URL("../entrypoints/scripts/comment-icon.tsx?recent", import.meta.url).href
+  )
+  const cleanupRecent = mountRecent()
+  click("button[onclick]", comment)
+  await tick()
+  const recentGrid = comment.querySelector<HTMLElement>(".ruricon-icon-grid")!
+  const recentSources = [...recentGrid.querySelectorAll<HTMLImageElement>("img")].map(
+    (image) => image.src,
+  )
+  assert(
+    recentSources.slice(0, 10).join(",") ===
+      [25, 50, 20, 21, 22, 23, 24, 26, 27, 28].map((index) => source(901, index)).join(","),
+    "Favorites precede the latest set recents in usage order",
+  )
+  assert(
+    recentGrid.querySelectorAll('[data-recent="true"]').length === 9,
+    "Ten recent markers are shared across set pages; unrelated history does not consume the cap",
+  )
+  const purpleButton = recentGrid.querySelector(
+    '.ruricon-icon-tile[data-recent="true"][data-favorite="false"] .ruricon-icon-insert',
+  )!
+  assert(
+    getComputedStyle(purpleButton).borderColor === "rgb(152, 97, 212)" &&
+      getComputedStyle(purpleButton).borderWidth === "2px",
+    "Recent icons have a purple border",
+  )
+  assert(
+    getComputedStyle(
+      recentGrid.querySelector(
+        '.ruricon-icon-tile[data-recent="true"][data-favorite="true"] .ruricon-icon-insert',
+      )!,
+    ).borderColor === "rgb(233, 163, 35)",
+    "Favorite border takes precedence over recent border",
+  )
+  click(".ruricon-icon-pages button:last-child", comment)
+  assert(
+    recentGrid.querySelectorAll('[data-recent="true"]').length === 1,
+    "Other set page retains its newest recent marker",
+  )
+  click(".ruricon-icon-tabs button:nth-child(3)", comment)
+  assert(
+    [...recentGrid.querySelectorAll<HTMLImageElement>("img")]
+      .map((image) => image.src)
+      .join(",") === recentSet.join(",") && !recentGrid.querySelector('[data-recent="true"]'),
+    "Recent tab keeps all history without the cap or purple markers",
+  )
+  const prioritizeRecent = comment.querySelector<HTMLButtonElement>(
+    ".ruricon-icon-prioritize-recent",
+  )!
+  assert(
+    !prioritizeRecent.hidden &&
+      prioritizeRecent.getAttribute("aria-pressed") === "true" &&
+      prioritizeRecent.querySelector("path")!.getAttribute("d") === "M20 6 9 17l-5-5",
+    "Recent priority defaults on with the Lucide Check icon",
+  )
+  click(".ruricon-icon-prioritize-recent", comment)
+  assert(
+    prioritizeRecent.getAttribute("aria-pressed") === "false" &&
+      prioritizeRecent.querySelectorAll("path").length === 2,
+    "Recent priority off uses the Lucide X icon",
+  )
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).prioritizeRecent === false,
+    "Recent priority setting is persisted",
+  )
+  assert(
+    [...recentGrid.querySelectorAll<HTMLImageElement>("img")]
+      .map((image) => image.src)
+      .join(",") === recentSet.join(","),
+    "Priority toggle preserves Recent tab order",
+  )
+  click(".ruricon-icon-tabs button:first-child", comment)
+  assert(
+    prioritizeRecent.hidden &&
+      [...recentGrid.querySelectorAll<HTMLImageElement>("img")]
+        .slice(0, 5)
+        .map((image) => image.src)
+        .join(",") === [25, 50, 0, 1, 2].map((index) => source(901, index)).join(","),
+    "Priority off keeps favorites first and restores original order for other icons",
+  )
+  assert(
+    recentGrid.querySelectorAll('[data-recent="true"]').length === 9,
+    "Priority toggle preserves recent highlights and cap",
+  )
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  assert(
+    !recentGrid.querySelector('[data-recent="true"]'),
+    "Favorite tab does not show recent markers",
+  )
+  const editButton = comment.querySelector<HTMLButtonElement>(".ruricon-icon-edit-mode")!
+  assert(
+    editButton.getAttribute("aria-pressed") === "false" &&
+      editButton.querySelector("svg")!.getAttribute("fill") === "none",
+    "Edit mode starts off with an empty star",
+  )
+  const storedBeforeEdit = localStorage.getItem("ruricon:icon-view:v1")
+  click(".ruricon-icon-edit-mode", comment)
+  assert(
+    editButton.getAttribute("aria-pressed") === "true" &&
+      editButton.querySelector("svg")!.getAttribute("fill") === "currentColor",
+    "Edit mode on has a filled star",
+  )
+  for (const tabIndex of [1, 2, 3]) {
+    click(`.ruricon-icon-tabs button:nth-child(${tabIndex})`, comment)
+    assert(
+      getComputedStyle(recentGrid.querySelector(".ruricon-icon-star")!).display !== "none",
+      "Edit mode shows favorite controls in every tab",
+    )
+    assert(editButton.hidden === (tabIndex !== 2), "Edit toggle appears only in Favorites")
+  }
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  click(".ruricon-icon-edit-mode", comment)
+  assert(
+    editButton.querySelector("svg")!.getAttribute("fill") === "none",
+    "Turning edit mode off restores the empty star",
+  )
+  for (const tabIndex of [1, 2, 3]) {
+    click(`.ruricon-icon-tabs button:nth-child(${tabIndex})`, comment)
+    assert(
+      getComputedStyle(recentGrid.querySelector(".ruricon-icon-star")!).display === "none",
+      "Edit mode off hides favorite controls in every tab",
+    )
+  }
+  assert(
+    localStorage.getItem("ruricon:icon-view:v1") === storedBeforeEdit,
+    "Editing mode does not modify saved icons or history",
+  )
+  const clearRecent = comment.querySelector<HTMLButtonElement>(".ruricon-icon-clear-recent")!
+  assert(
+    !clearRecent.hidden && !clearRecent.disabled && clearRecent.querySelector("svg"),
+    "Recent tab has a Lucide history delete button",
+  )
+  const savedBeforeClear = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  click(".ruricon-icon-clear-recent", comment)
+  const savedAfterClear = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    !savedAfterClear.recent.length &&
+      JSON.stringify({ ...savedAfterClear, recent: savedBeforeClear.recent }) ===
+        JSON.stringify(savedBeforeClear),
+    "Deleting history persists an empty list and preserves other preferences",
+  )
+  assert(
+    !recentGrid.querySelector("img") && clearRecent.disabled,
+    "Cleared recent tab is empty and delete is disabled",
+  )
+  click(".ruricon-icon-tabs button:first-child", comment)
+  assert(
+    clearRecent.hidden && !recentGrid.querySelector('[data-recent="true"]'),
+    "Delete is hidden in All and recent highlights are removed",
+  )
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  assert(
+    clearRecent.hidden && recentGrid.querySelectorAll("img").length === 2,
+    "Favorites are preserved and delete is hidden in Favorites",
+  )
+  enableEditMode(comment)
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).editMode === true,
+    "Edit mode on is persisted",
+  )
+  void act(cleanupRecent)
+  for (const enabled of [true, false]) {
+    const cleanupReload = mountRecent()
+    click("button[onclick]", comment)
+    await tick()
+    click(".ruricon-icon-tabs button:nth-child(3)", comment)
+    const restoredPriority = comment.querySelector<HTMLButtonElement>(
+      ".ruricon-icon-prioritize-recent",
+    )!
+    assert(
+      restoredPriority.getAttribute("aria-pressed") === String(!enabled),
+      "Reload restores recent priority ON and OFF",
+    )
+    if (enabled) click(".ruricon-icon-prioritize-recent", comment)
+    click(".ruricon-icon-tabs button:nth-child(2)", comment)
+    const restoredButton = comment.querySelector<HTMLButtonElement>(".ruricon-icon-edit-mode")!
+    assert(
+      restoredButton.getAttribute("aria-pressed") === String(enabled) &&
+        restoredButton.querySelector("svg")!.getAttribute("fill") ===
+          (enabled ? "currentColor" : "none"),
+      "Reload restores persisted edit mode and star",
+    )
+    assert(
+      (getComputedStyle(comment.querySelector(".ruricon-icon-star")!).display !== "none") ===
+        enabled,
+      "Reload restores favorite button visibility",
+    )
+    if (enabled) {
+      click(".ruricon-icon-edit-mode", comment)
+      assert(
+        JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).editMode === false,
+        "Edit mode off is persisted",
+      )
+    }
+    void act(cleanupReload)
+  }
   result.textContent =
     "PASS: API parsing, segment/native pages, URL preservation, favorites/recent, retry, races, comment/reply ownership and cleanup"
   result.dataset.result = "PASS"

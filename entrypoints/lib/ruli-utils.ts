@@ -276,8 +276,9 @@ export async function readIconFavorite() {
     })
     .filter((v) => v != null)
 
-  // Remove forced AD icon
-  iconElements.splice(0, 2)
+  // Force last as AD icon
+  const adLeftover = iconElements.splice(0, 2)
+  iconElements.push(...adLeftover)
 
   return iconElements
 }

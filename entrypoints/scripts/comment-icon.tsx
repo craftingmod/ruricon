@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, type IconNode, Star } from "lucide"
+import { Check, ChevronLeft, ChevronRight, type IconNode, SquareOff, Star, Trash2, X } from "lucide"
 import { createPortal, createRef, h, render as renderView, type Ref } from "preact"
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "preact/hooks"
 
@@ -15,7 +15,13 @@ import { mobileDomain } from "../lib/ruli-constants.ts"
 import "./comment-icon.css"
 
 type Mode = "all" | "favorites" | "recent"
-type Saved = { presetId: number | null; favorites: string[]; recent: string[] }
+type Saved = {
+  presetId: number | null
+  favorites: string[]
+  recent: string[]
+  editMode: boolean
+  prioritizeRecent: boolean
+}
 type UpdateSaved = (update: (current: Saved) => Saved) => void
 type DialogRequest = {
   presets: Preset[]
@@ -45,9 +51,12 @@ function readPreferences(): Saved {
       presetId: Number.isSafeInteger(value?.presetId) && value.presetId > 0 ? value.presetId : null,
       favorites: [...new Set(urls(value?.favorites))].slice(0, localIconLimit),
       recent: [...new Set(urls(value?.recent))].slice(0, localIconLimit),
+      editMode: value?.editMode === true,
+      prioritizeRecent:
+        typeof value?.prioritizeRecent === "boolean" ? value.prioritizeRecent : true,
     }
   } catch {
-    return { presetId: null, favorites: [], recent: [] }
+    return { presetId: null, favorites: [], recent: [], editMode: false, prioritizeRecent: true }
   }
 }
 
@@ -342,18 +351,20 @@ function IconTile({
   src,
   index,
   favorite,
+  recent,
   insert,
   toggleFavorite,
 }: {
   src: string
   index: number
   favorite: boolean
+  recent: boolean
   insert: (image: HTMLImageElement, src: string) => Promise<void>
   toggleFavorite: (src: string) => void
 }) {
   const image = useRef<HTMLImageElement>(null)
   return (
-    <div class="ruricon-icon-tile">
+    <div class="ruricon-icon-tile" data-favorite={String(favorite)} data-recent={String(recent)}>
       <button
         type="button"
         class="ruricon-icon-insert"
@@ -405,6 +416,7 @@ function IconView({
   const [selected, setSelected] = useState<Preset | null>(null)
   const [collection, setCollection] = useState<IconCollection | null>(null)
   const [mode, setMode] = useState<Mode>("all")
+  const { editMode } = saved
   const [pageIndex, setPageIndex] = useState(0)
   const [nativePages, setNativePages] = useState(new Map<number, string[]>())
   const [ready, setReady] = useState(false)
@@ -434,6 +446,28 @@ function IconView({
       : collection?.nativeId === null
         ? (collection.pages[index]?.images ?? [])
         : (nativePages.get(index) ?? [])
+  const favorites = new Set(saved.favorites)
+  const setImages = new Set(
+    collection?.nativeId === null
+      ? collection.pages.flatMap((page) => page.images)
+      : [...nativePages.values()].flat(),
+  )
+  const recent = new Map(
+    saved.recent
+      .filter((src) => setImages.has(src))
+      .slice(0, 10)
+      .map((src, index) => [src, index]),
+  )
+  const orderedImages =
+    mode === "all"
+      ? [...images].sort(
+          (a, b) =>
+            Number(favorites.has(b)) - Number(favorites.has(a)) ||
+            (favorites.has(a) || !saved.prioritizeRecent
+              ? 0
+              : (recent.get(a) ?? 10) - (recent.get(b) ?? 10)),
+        )
+      : images
 
   useLayoutEffect(() => {
     container.hidden = !visible
@@ -581,7 +615,7 @@ function IconView({
         ...current,
         recent: [src, ...current.recent.filter((url) => url !== src)].slice(0, localIconLimit),
       }))
-      setLoading((current) => ({ ...current, message: "아이콘을 댓글 입력창에 전달했습니다." }))
+      setLoading((current) => ({ ...current, message: "" }))
     } catch (error) {
       if (alive.current)
         setLoading((current) => ({
@@ -592,7 +626,12 @@ function IconView({
   }
 
   return createPortal(
-    <section class="ruricon-icon-view" aria-label="아이콘 선택" aria-busy={loading.busy}>
+    <section
+      class="ruricon-icon-view"
+      data-edit-mode={String(editMode)}
+      aria-label="아이콘 선택"
+      aria-busy={loading.busy}
+    >
       <strong>아이콘 선택</strong>
       <button
         ref={select}
@@ -648,6 +687,17 @@ function IconView({
               {label}
             </button>
           ))}
+          <button
+            type="button"
+            class="ruricon-icon-clear-recent"
+            hidden={mode !== "recent"}
+            disabled={!saved.recent.length}
+            aria-label="최근 사용 기록 삭제"
+            title="최근 사용 기록 삭제"
+            onClick={() => updateSaved((current) => ({ ...current, recent: [] }))}
+          >
+            <Icon node={Trash2} size={16} />
+          </button>
         </div>
         <nav
           ref={pages}
@@ -672,6 +722,29 @@ function IconView({
             )
           })}
         </nav>
+        <button
+          type="button"
+          class="ruricon-icon-edit-mode"
+          hidden={mode !== "favorites"}
+          aria-pressed={editMode}
+          onClick={() => updateSaved((current) => ({ ...current, editMode: !current.editMode }))}
+        >
+          <Icon node={Star} size={16} filled={editMode} />
+          편집 모드
+        </button>
+        <button
+          type="button"
+          class="ruricon-icon-prioritize-recent"
+          hidden={mode !== "recent"}
+          aria-pressed={saved.prioritizeRecent}
+          title="전체 탭에서 최근 사용 아이콘 우선 정렬"
+          onClick={() =>
+            updateSaved((current) => ({ ...current, prioritizeRecent: !current.prioritizeRecent }))
+          }
+        >
+          <Icon node={saved.prioritizeRecent ? Check : X} size={16} />
+          우선 정렬
+        </button>
       </div>
       <div role="status">{[loading.message, storageError].filter(Boolean).join(" ")}</div>
       <button
@@ -684,17 +757,22 @@ function IconView({
         다시 시도
       </button>
       <div ref={grid} class="ruricon-icon-grid" aria-label="아이콘 목록">
-        {images.map((src, position) => (
+        {orderedImages.map((src, position) => (
           <IconTile
             key={src}
             src={src}
             index={position}
-            favorite={saved.favorites.includes(src)}
+            favorite={favorites.has(src)}
+            recent={mode === "all" && recent.has(src)}
             insert={insertIcon}
             toggleFavorite={toggleFavorite}
           />
         ))}
-        {!images.length && !loading.busy && "표시할 아이콘이 없습니다."}
+        {!images.length && !loading.busy && (
+          <div class="ruricon-icon-empty" role="img" aria-label="표시할 아이콘이 없습니다.">
+            <Icon node={SquareOff} size={32} />
+          </div>
+        )}
       </div>
     </section>,
     container,
