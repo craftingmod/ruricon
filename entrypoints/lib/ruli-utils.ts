@@ -1,5 +1,5 @@
 import { articlePostDelayMs } from "./constants.ts"
-import { getEditUrl, getViewUrl } from "./ruli-constants.ts"
+import { getEditUrl, getIconImagesUrl, getViewUrl, iconListUrl } from "./ruli-constants.ts"
 
 export interface Article {
   board_id: number
@@ -187,5 +187,159 @@ export async function writeArticle(
       nextWriteAt = Date.now() + 35_000
       release()
     }
+  }
+}
+
+async function requestGet<T>(url: string) {
+  const rawRequest = await fetch(url, {
+    method: "get",
+    mode: "cors",
+    redirect: "follow",
+  })
+  if (rawRequest.status !== 200) {
+    throw new Error(`Server status error: ${rawRequest.status}`)
+  }
+  return (await rawRequest.json()) as T
+}
+
+export function getLastId(str: string) {
+  const id = Number(str.substring(
+    str.lastIndexOf(",") + 1,
+    str.lastIndexOf(");") - 1
+  ).trim())
+  if (Number.isNaN(id)) {
+    return null
+  }
+  return id
+}
+
+/**
+ * Read user's favorite iconPacks
+ */
+export async function readIconFavorite() {
+  const json = await requestGet<{
+    success: boolean,
+    html: string,
+  }>(iconListUrl)
+
+  if (!(json.success ?? false)) {
+    throw new Error(`Server responded with fail: ${JSON.stringify(json) ?? "unknown"}`)
+  }
+
+  const parser = new DOMParser()
+  const $ = parser.parseFromString(json.html, "text/html")
+  const iconElements = Array.from(
+    $.querySelectorAll<HTMLDivElement>(":scope > div:last-child > div:first-of-type > div")
+  ).map((div) => {
+    const outDOM = div.querySelector<HTMLDivElement>(":scope > div")!
+
+    const onClickScript = outDOM.getAttribute("onclick")
+    if (onClickScript == null) {
+      console.error(`[RuliUtil] Icon onClick is null. DOM: ${outDOM.outerHTML}`)
+      return null
+    }
+
+    const iconId = getLastId(onClickScript)
+    if (iconId == null) {
+      console.error(`[RuliUtil] Icon script is unknown. onClick: ${onClickScript}`)
+      return null
+    }
+
+    const iconTitle = outDOM.getAttribute("title") ?? "Unknown Title"
+
+    const thumbnail = Object.create(null) as {
+      type: "image" | "video",
+      src: string,
+    }
+
+    const imageDOM = outDOM.querySelector<HTMLImageElement>("img")
+    if (imageDOM == null) {
+      const videoDOM = outDOM.querySelector<HTMLVideoElement>("video")
+      if (videoDOM == null) {
+        console.error(`[RuliUtil] Icon thumbnail is unknown. dom: ${outDOM.outerHTML}`)
+        return null
+      }
+      thumbnail.src = videoDOM.getAttribute("src") ?? ""
+
+      // mp4 auto convert
+      if (thumbnail.src.endsWith(".mp4?gif")) {
+        thumbnail.src = thumbnail.src.replace(".mp4?gif", ".gif")
+        thumbnail.type = "image"
+      } else {
+        thumbnail.type = "video"
+      }
+
+    } else {
+      thumbnail.type = "image"
+      thumbnail.src = imageDOM.getAttribute("src") ?? ""
+    }
+
+    return {
+      iconId,
+      iconTitle,
+      thumbnail,
+    }
+  }).filter((v) => v != null)
+
+  // Remove forced AD icon
+  iconElements.splice(0, 2)
+
+  return iconElements
+}
+
+/**
+ * Read icon images from iconPack by `iconId`
+ * @param iconId IconPack ID
+ * @param offset Read offset
+ * @param limit Read limit (server default: 100)
+ * @returns Paged icon info
+ */
+export async function readIconImages(iconId: number, offset = 0, limit = 100) {
+  const requestUrl = getIconImagesUrl(iconId, offset, limit)
+  const json = await requestGet<{
+    success: boolean,
+    html: string,
+    has_more: boolean,
+    next_offset: number,
+    total_count: number,
+  }>(requestUrl)
+
+  if (!(json.success ?? false)) {
+    throw new Error(`Server responded with fail: ${JSON.stringify(json) ?? "unknown"}`)
+  }
+
+  const parser = new DOMParser()
+  const $ = parser.parseFromString(json.html, "text/html")
+
+  const firstInfoDOM = $.querySelector<HTMLDivElement>(":scope > div:first-of-type")!
+
+  const title = firstInfoDOM.querySelector(":scope > a")?.textContent ?? "Unknown title"
+
+  const realIconId = getLastId(
+    firstInfoDOM.querySelector<HTMLSpanElement>(":scope > span")?.getAttribute("onclick") ?? "0"
+  ) ?? 0
+
+  if (realIconId <= 0) {
+    throw new Error("Unknown realIconId!")
+  }
+
+
+  const iconSrc = Array.from(
+    $.querySelectorAll<HTMLImageElement | HTMLVideoElement>(":scope > .select_icon_box > :is(img, video)")
+  ).map((media) => {
+    const src = media.getAttribute("src")
+    if (src == null) {
+      return null
+    }
+    return src.replace("mp4?gif", "gif")
+  }).filter((v) => v != null)
+
+  return {
+    hasMore: json.has_more,
+    nextOffset: json.next_offset,
+    total_count: json.total_count,
+    title,
+    realIconId,
+    icons: iconSrc,
   }
 }
