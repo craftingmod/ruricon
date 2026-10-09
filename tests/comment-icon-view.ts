@@ -11,6 +11,7 @@ function assert(value: unknown, message: string): asserts value {
 const requests: string[] = []
 const source = (id: number, index: number) =>
   `https://example.com/${id}/${index}.${id === 5033 && index === 1 ? "mp4" : "png"}?icon=${id}`
+const nativeSource = (id: number, index: number) => source(id, index).split("?")[0]
 let failSecondPage = true
 let releaseSlow: (() => void) | null = null
 let releaseInsert: (() => void) | null = null
@@ -67,11 +68,20 @@ window.fetch = async (input, options) => {
       await new Promise<void>((resolve) => {
         releaseSlow = resolve
       })
-    const total = id === 5033 ? 205 : 1
-    const media = Array.from(
-      { length: Math.min(100, total - offset) },
-      (_, index) => `<img src="${source(id, offset + index)}">`,
-    ).join("")
+    const total = id === 5033 || id === 970 ? 205 : 1
+    const media =
+      id === 970
+        ? [
+            `${nativeSource(id, offset)}?icon=1234`,
+            `${nativeSource(id, offset)}?icon=5678`,
+            `${nativeSource(id, offset + 1)}?size=large&icon=1234#preview`,
+          ]
+            .map((src) => `<img src="${src}">`)
+            .join("")
+        : Array.from(
+            { length: Math.min(100, total - offset) },
+            (_, index) => `<img src="${source(id, offset + index)}">`,
+          ).join("")
     const html = offset
       ? media
       : `<style>.native{}</style><div><a>Native</a><span onclick="app.comment_icon_pick_add(this, 'Native', ${id});"></span></div><div class="select_icon_box">${media}</div>`
@@ -298,7 +308,7 @@ async function check() {
   )
   const scrollingGrid = comment.querySelector<HTMLElement>(".ruricon-icon-grid")!
   const existingVideo = scrollingGrid.querySelector<HTMLVideoElement>("video")!
-  assert(existingVideo?.src === source(5033, 1), "Video keeps the original URL")
+  assert(existingVideo?.src === nativeSource(5033, 1), "Video removes the icon query")
   assert(scrollingGrid.scrollHeight > scrollingGrid.clientHeight, "Full page scrolls vertically")
   scrollingGrid.scrollTop = 150
   const favoriteScrollTop = scrollingGrid.scrollTop
@@ -320,7 +330,7 @@ async function check() {
   click(".ruricon-icon-insert", existingVideo.closest(".ruricon-icon-tile")!)
   await tick()
   assert(
-    comment.querySelector<HTMLImageElement>(".icon_preview")?.src === source(5033, 1),
+    comment.querySelector<HTMLImageElement>(".icon_preview")?.src === nativeSource(5033, 1),
     "Video insertion passes the hidden image to the native adapter",
   )
   assert(comment.querySelectorAll(".ruricon-icon-pages button").length === 3, "Native page count")
@@ -338,8 +348,9 @@ async function check() {
     "Retry loads offset page without header",
   )
   assert(
-    comment.querySelector<HTMLImageElement>(".ruricon-icon-grid img")!.src === source(5033, 100),
-    "Offset page preserves URLs",
+    comment.querySelector<HTMLImageElement>(".ruricon-icon-grid img")!.src ===
+      nativeSource(5033, 100),
+    "Offset page removes the icon query",
   )
   click(".ruricon-icon-pages button:last-child", comment)
   await tick()
@@ -594,6 +605,26 @@ async function check() {
   const beforeNewPage = requests.length
   await Promise.all([loadNativePage(960, 0), loadNativePage(960, 0)])
   assert(requests.length === beforeNewPage + 1, "Concurrent requests share one fetch")
+  const deduplicated = await loadNativePage(970, 0)
+  assert(
+    deduplicated.images.join(",") ===
+      [nativeSource(970, 0), `${nativeSource(970, 1)}?size=large#preview`].join(","),
+    "Native URLs remove icon, preserve other parameters and fragments, and deduplicate in order",
+  )
+  assert(
+    deduplicated.nextOffset === 100 && deduplicated.total === 205,
+    "Deduplication preserves the server offset and total",
+  )
+  const nextPage = await loadNativePage(970, deduplicated.nextOffset)
+  assert(
+    nextPage.number === 2 && nextPage.nextOffset === 200 && nextPage.images.length === 2,
+    "Next page uses the server offset independently of the unique image count",
+  )
+  const lastPage = await loadNativePage(970, nextPage.nextOffset)
+  assert(
+    lastPage.nextOffset === null && lastPage.total === 205,
+    "Last page keeps server pagination",
+  )
   await loadNativePage(5033, 200)
   await readIconImages(5033, 200)
   void act(cleanup)
@@ -603,7 +634,11 @@ async function check() {
   const storedIcons = Array.from({ length: 1001 }, (_, index) => source(777, index))
   localStorage.setItem(
     "ruricon:icon-view:v1",
-    JSON.stringify({ presetId: 5033, favorites: storedIcons, recent: storedIcons }),
+    JSON.stringify({
+      presetId: 5033,
+      favorites: [storedIcons[0], ...storedIcons],
+      recent: [storedIcons[0], ...storedIcons],
+    }),
   )
   const { mountCommentIconHook: mountLimits } = await import(
     new URL("../entrypoints/scripts/comment-icon.tsx?limits", import.meta.url).href
@@ -619,6 +654,13 @@ async function check() {
       comment.querySelectorAll(".ruricon-icon-grid img").length === 1000,
       "Local lists display all 1000 icons on one page",
     )
+    const sources = [...comment.querySelectorAll<HTMLImageElement>(".ruricon-icon-grid img")].map(
+      (image) => image.src,
+    )
+    assert(
+      new Set(sources).size === 1000 && sources.at(-1) === storedIcons[999],
+      "Stored duplicate URLs are removed before applying the local list limit",
+    )
     assert(
       localPages.hidden &&
         getComputedStyle(localPages).display === "none" &&
@@ -628,8 +670,13 @@ async function check() {
   }
   click(".ruricon-icon-insert", comment)
   await tick()
+  click(".ruricon-icon-insert", comment)
+  await tick()
+  const reusedRecent = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).recent
   assert(
-    JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).recent.length === 1000,
+    reusedRecent.length === 1000 &&
+      new Set(reusedRecent).size === 1000 &&
+      reusedRecent.filter((src: string) => src === storedIcons[0]).length === 1,
     "Reusing a recent icon keeps 1000 unique entries",
   )
   click(".ruricon-icon-tabs button:first-child", comment)
@@ -644,7 +691,9 @@ async function check() {
   await tick()
   const recent = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).recent
   assert(
-    recent.length === 1000 && recent[0] === source(5033, 0) && recent.at(-1) === source(777, 998),
+    recent.length === 1000 &&
+      recent[0] === nativeSource(5033, 0) &&
+      recent.at(-1) === source(777, 998),
     "New recent icon keeps the latest 1000 entries",
   )
   click(".ruricon-icon-tabs button:nth-child(2)", comment)
@@ -658,20 +707,32 @@ async function check() {
   )
   click(".ruricon-icon-tabs button:first-child", comment)
   click(".ruricon-icon-star", comment)
+  const savedFavorites = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).favorites
   assert(
-    JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).favorites.length === 1000 &&
+    savedFavorites.length === 1000 &&
+      new Set(savedFavorites).size === 1000 &&
+      savedFavorites.filter(
+        (src: string) =>
+          src === comment.querySelector<HTMLImageElement>(".ruricon-icon-grid img")!.src,
+      ).length === 1 &&
       comment.querySelector(".ruricon-icon-star")!.getAttribute("aria-pressed") === "true",
     "Favorite can be added after freeing a slot",
   )
   click(".ruricon-icon-star", comment)
   const nativeStars = comment.querySelectorAll<HTMLButtonElement>(".ruricon-icon-star")
+  const repeatedFavoriteSrc = nativeStars[0]
+    .closest(".ruricon-icon-tile")!
+    .querySelector<HTMLImageElement>("img")!.src
   void act(() => {
+    nativeStars[0].click()
     nativeStars[0].click()
     nativeStars[1].click()
   })
+  const batchedFavorites = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).favorites
   assert(
-    JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).favorites.length === 1000,
-    "Batched favorite additions cannot exceed the limit",
+    batchedFavorites.length === 1000 &&
+      batchedFavorites.filter((src: string) => src === repeatedFavoriteSrc).length === 1,
+    "Repeated batched additions preserve the first favorite and cannot exceed the limit",
   )
   const storedBeforeUnmount = localStorage.getItem("ruricon:icon-view:v1")
   window.app.select_icon = async (image) => {
@@ -901,6 +962,55 @@ async function check() {
     }
     void act(cleanupReload)
   }
+  localStorage.setItem(
+    "ruricon:icon-view:v1",
+    JSON.stringify({
+      presetId: 5033,
+      favorites: [],
+      recent: [],
+      editMode: false,
+      prioritizeRecent: true,
+    }),
+  )
+  const cleanupScroll = mountRecent()
+  click("button[onclick]", comment)
+  await tick()
+  const insertGrid = comment.querySelector<HTMLElement>(".ruricon-icon-grid")!
+  const lowerImage = insertGrid.querySelectorAll<HTMLImageElement>("img")[40]
+  const lowerTile = lowerImage.closest<HTMLElement>(".ruricon-icon-tile")!
+  lowerTile.querySelector<HTMLButtonElement>(".ruricon-icon-insert")!.focus()
+  const insertScrollTop = insertGrid.scrollTop
+  assert(
+    insertScrollTop > 0,
+    "Recent insertion regression starts with a focused icon in a scrolled grid",
+  )
+  click(".ruricon-icon-insert", lowerTile)
+  await tick()
+  assert(
+    insertGrid.querySelector("img") === lowerImage,
+    "Inserted icon moves first without recreating its DOM",
+  )
+  assert(
+    insertGrid.scrollTop === insertScrollTop,
+    `Recent priority preserves grid scroll when the clicked icon moves first (${insertScrollTop} -> ${insertGrid.scrollTop}; focus=${document.activeElement?.className})`,
+  )
+  assert(
+    document.activeElement === lowerTile.querySelector(".ruricon-icon-insert"),
+    "Recent reordering preserves keyboard focus without scrolling",
+  )
+  click(".ruricon-icon-tabs button:first-child", comment)
+  assert(
+    insertGrid.scrollTop === insertScrollTop,
+    "Selecting the current tab does not reset scroll",
+  )
+  click(".ruricon-icon-tabs button:nth-child(3)", comment)
+  assert(insertGrid.scrollTop === 0, "Changing tabs resets scroll")
+  click(".ruricon-icon-tabs button:first-child", comment)
+  insertGrid.querySelectorAll<HTMLButtonElement>(".ruricon-icon-insert")[80].focus()
+  assert(insertGrid.scrollTop > 0, "Page change starts from a scrolled grid")
+  click(".ruricon-icon-pages button:nth-child(2)", comment)
+  assert(insertGrid.scrollTop === 0, "Changing pages resets scroll")
+  void act(cleanupScroll)
   result.textContent =
     "PASS: API parsing, segment/native pages, URL preservation, favorites/recent, retry, races, comment/reply ownership and cleanup"
   result.dataset.result = "PASS"

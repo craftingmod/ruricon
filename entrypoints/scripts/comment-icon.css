@@ -194,6 +194,7 @@
   gap: 5px;
   max-height: min(50dvh, 480px);
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   padding: 3px;
   justify-content: center;

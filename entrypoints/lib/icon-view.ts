@@ -66,9 +66,19 @@ export function loadNativePage(id: number, offset: number): Promise<IconPage> {
     if (result.icons.some((src) => !/^https?:\/\//i.test(src) || !URL.canParse(src))) {
       throw new Error("아이콘 주소를 확인해주세요.")
     }
+    /*
+      When removing ?icon
+      ...new Set(
+        result.icons.map((src) => {
+          const url = new URL(src)
+          url.searchParams.delete("icon")
+          return url.href
+        }),
+      ),
+    */
     return {
       number: offset / 100 + 1,
-      images: result.icons,
+      images: [...new Set(result.icons)],
       nextOffset: result.hasMore ? result.nextOffset : null,
       total: result.total_count,
     }

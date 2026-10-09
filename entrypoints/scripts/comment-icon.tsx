@@ -353,14 +353,14 @@ function IconTile({
   favorite,
   recent,
   insert,
-  toggleFavorite,
+  setFavorite,
 }: {
   src: string
   index: number
   favorite: boolean
   recent: boolean
   insert: (image: HTMLImageElement, src: string) => Promise<void>
-  toggleFavorite: (src: string) => void
+  setFavorite: (src: string, favorite: boolean) => void
 }) {
   const image = useRef<HTMLImageElement>(null)
   return (
@@ -389,7 +389,7 @@ function IconTile({
         class="ruricon-icon-star"
         aria-label="즐겨찾기 추가/제거"
         aria-pressed={favorite}
-        onClick={() => toggleFavorite(src)}
+        onClick={() => setFavorite(src, !favorite)}
       >
         <Icon node={Star} size={16} filled={favorite} />
       </button>
@@ -430,7 +430,7 @@ function IconView({
   const grid = useRef<HTMLDivElement>(null)
   const pages = useRef<HTMLElement>(null)
   const select = useRef<HTMLButtonElement>(null)
-  const scrollTop = useRef<number | null>(null)
+  const reorderedFocus = useRef<HTMLElement | null>(null)
   const local = mode === "favorites" ? saved.favorites : saved.recent
   const total = mode === "all" ? (collection?.pages[0]?.total ?? 0) : local.length
   const pageCount =
@@ -475,9 +475,14 @@ function IconView({
   }, [container, visible])
 
   useLayoutEffect(() => {
-    if (scrollTop.current !== null) {
-      grid.current!.scrollTop = scrollTop.current
-      scrollTop.current = null
+    grid.current?.scrollTo({ top: 0, behavior: "instant" })
+  }, [selected?.id, mode, index])
+
+  useLayoutEffect(() => {
+    if (reorderedFocus.current) {
+      const focused = reorderedFocus.current
+      reorderedFocus.current = null
+      if (focused.isConnected) focused.focus({ preventScroll: true })
     }
     if (document.activeElement?.parentElement === pages.current)
       pages.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus()
@@ -521,7 +526,6 @@ function IconView({
     setPageIndex(0)
     setCollection(null)
     setNativePages(new Map())
-    scrollTop.current = 0
     await request(
       () => loadCollection(preset),
       (result) => {
@@ -538,7 +542,6 @@ function IconView({
 
   async function changePage(next: number) {
     setPageIndex(next)
-    scrollTop.current = 0
     if (mode !== "all" || !collection?.nativeId || nativePages.has(next)) {
       revision.current++
       setLoading({ busy: false, message: "", retry: null })
@@ -572,28 +575,26 @@ function IconView({
     revision.current++
     setMode(next)
     setPageIndex(0)
-    scrollTop.current = 0
     setLoading({ busy: false, message: "", retry: null })
     if (next === "all" && selected && !collection) void selectPreset(selected)
   }
 
-  function toggleFavorite(src: string) {
-    if (!saved.favorites.includes(src) && saved.favorites.length >= localIconLimit) {
+  function setFavorite(src: string, favorite: boolean) {
+    if (favorite && !saved.favorites.includes(src) && saved.favorites.length >= localIconLimit) {
       setLoading((current) => ({
         ...current,
         message: `즐겨찾기는 최대 ${localIconLimit}개까지 저장할 수 있습니다.`,
       }))
       return
     }
-    scrollTop.current = grid.current!.scrollTop
     updateSaved((current) => {
-      if (!current.favorites.includes(src) && current.favorites.length >= localIconLimit)
-        return current
+      if (current.favorites.includes(src) === favorite) return current
+      if (favorite && current.favorites.length >= localIconLimit) return current
       return {
         ...current,
-        favorites: current.favorites.includes(src)
-          ? current.favorites.filter((url) => url !== src)
-          : [...current.favorites, src],
+        favorites: favorite
+          ? [...current.favorites, src]
+          : current.favorites.filter((url) => url !== src),
       }
     })
   }
@@ -611,6 +612,12 @@ function IconView({
         ).some((preview) => preview.src === image.src)
       )
         throw new Error("아이콘 미리보기를 만들지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
+      const focused = document.activeElement
+      if (focused instanceof HTMLElement && grid.current?.contains(focused)) {
+        // Moving a focused icon makes the browser scroll it into view.
+        reorderedFocus.current = focused
+        focused.blur()
+      }
       updateSaved((current) => ({
         ...current,
         recent: [src, ...current.recent.filter((url) => url !== src)].slice(0, localIconLimit),
@@ -765,7 +772,7 @@ function IconView({
             favorite={favorites.has(src)}
             recent={mode === "all" && recent.has(src)}
             insert={insertIcon}
-            toggleFavorite={toggleFavorite}
+            setFavorite={setFavorite}
           />
         ))}
         {!images.length && !loading.busy && (
