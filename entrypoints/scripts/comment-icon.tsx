@@ -629,49 +629,50 @@ function IconView({
           void selectPreset(preset)
         }}
       />
-      <div class="ruricon-icon-tabs">
-        {(
-          [
-            ["all", "전체"],
-            ["favorites", "★ 즐겨찾기"],
-            ["recent", "최근 사용"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={value === mode}
-            disabled={loading.busy && !ready}
-            onClick={() => changeMode(value)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <nav
-        ref={pages}
-        class="ruricon-icon-pages"
-        aria-label="아이콘 페이지"
-        hidden={mode !== "all"}
-      >
-        {Array.from({ length: pageCount }, (_, page) => {
-          const number = collection?.nativeId === null ? collection.pages[page].number : page + 1
-          return (
+      <div class="ruricon-icon-toolbar" data-mobile={String(location.hostname === mobileDomain)}>
+        <div class="ruricon-icon-tabs">
+          {(
+            [
+              ["all", "전체"],
+              ["favorites", "★ 즐겨찾기"],
+              ["recent", "최근 사용"],
+            ] as const
+          ).map(([value, label]) => (
             <button
-              key={number}
+              key={value}
               type="button"
-              aria-label={`${number}페이지`}
-              aria-current={page === index ? "page" : undefined}
-              onClick={() => {
-                void changePage(page)
-              }}
+              aria-pressed={value === mode}
+              disabled={loading.busy && !ready}
+              onClick={() => changeMode(value)}
             >
-              {number}
+              {label}
             </button>
-          )
-        })}
-      </nav>
-      <div class="ruricon-icon-count">{`${mode === "all" ? "아이콘 목록" : mode === "favorites" ? "즐겨찾기" : "최근 사용"} · ${total}개${pageCount ? ` · ${images.length}개 표시` : ""}`}</div>
+          ))}
+        </div>
+        <nav
+          ref={pages}
+          class="ruricon-icon-pages"
+          aria-label="아이콘 페이지"
+          hidden={mode !== "all"}
+        >
+          {Array.from({ length: pageCount }, (_, page) => {
+            const number = collection?.nativeId === null ? collection.pages[page].number : page + 1
+            return (
+              <button
+                key={number}
+                type="button"
+                aria-label={`${number}페이지`}
+                aria-current={page === index ? "page" : undefined}
+                onClick={() => {
+                  void changePage(page)
+                }}
+              >
+                {number}
+              </button>
+            )
+          })}
+        </nav>
+      </div>
       <div role="status">{[loading.message, storageError].filter(Boolean).join(" ")}</div>
       <button
         type="button"

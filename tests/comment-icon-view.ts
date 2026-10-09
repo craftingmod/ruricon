@@ -169,6 +169,49 @@ async function check() {
     (button) => button.textContent,
   )
   assert(numbers.join(",") === "1,3", "Segment page numbers and order")
+  assert(!comment.querySelector(".ruricon-icon-count"), "Redundant info row is removed")
+  const toolbar = comment.querySelector<HTMLElement>(".ruricon-icon-toolbar")!
+  const tabs = comment.querySelector<HTMLElement>(".ruricon-icon-tabs")!
+  const iconPages = comment.querySelector<HTMLElement>(".ruricon-icon-pages")!
+  const pageButton = iconPages.querySelector<HTMLButtonElement>("button")!
+  const tabStyle = getComputedStyle(tabs.querySelector("button")!)
+  assert(tabStyle.borderWidth === "0px" && tabStyle.borderRadius === "999px", "Borderless chips")
+  const pageStyle = getComputedStyle(pageButton)
+  assert(
+    pageStyle.borderRadius === "50%" &&
+      pageButton.offsetWidth === 32 &&
+      pageButton.offsetHeight === 32,
+    "Page buttons are compact circles",
+  )
+  assert(
+    getComputedStyle(toolbar).flexDirection ===
+      (location.hostname === "m.ruliweb.com" ? "column" : "row"),
+    "Wide desktop uses one row; mobile keeps separate rows",
+  )
+  const extraPages = Array.from({ length: 18 }, (_, index) => {
+    const button = pageButton.cloneNode(true) as HTMLButtonElement
+    button.removeAttribute("aria-current")
+    button.textContent = String(index + 4)
+    iconPages.append(button)
+    return button
+  })
+  assert(iconPages.scrollWidth > iconPages.clientWidth, "Twenty pages scroll horizontally")
+  assert(
+    toolbar.scrollWidth <= toolbar.clientWidth &&
+      tabs.scrollWidth <= tabs.clientWidth &&
+      pageButton.offsetWidth === 32,
+    "Many pages preserve tabs and button size without overflowing the toolbar",
+  )
+  iconPages.scrollLeft = iconPages.scrollWidth
+  assert(
+    extraPages.at(-1)!.getBoundingClientRect().right <= iconPages.getBoundingClientRect().right,
+    "Last page is reachable by scrolling",
+  )
+  for (const button of extraPages) button.remove()
+  iconPages.scrollLeft = 0
+  ;(comment as HTMLElement).style.maxWidth = "360px"
+  assert(getComputedStyle(toolbar).flexDirection === "column", "Narrow desktop uses two rows")
+  ;(comment as HTMLElement).style.maxWidth = "720px"
   assert(
     comment
       .querySelector(".ruricon-preset-select")!

@@ -1,4 +1,5 @@
 .ruricon-icon-view {
+  container-type: inline-size;
   box-sizing: border-box;
   padding: 12px;
   border: 1px solid #aaa6;
@@ -51,8 +52,23 @@
   align-items: center;
   gap: 8px;
 }
-.ruricon-icon-tabs button {
+.ruricon-icon-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+.ruricon-icon-view .ruricon-icon-tabs button {
   flex: 1;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.ruricon-icon-tabs button:hover,
+.ruricon-icon-tabs button[aria-pressed="true"] {
+  background: #8882;
 }
 .ruricon-preset-shortcuts {
   --ruricon-preset-shortcut-size: 80px;
@@ -113,19 +129,36 @@
 }
 .ruricon-icon-pages {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
   gap: 5px;
-  margin: 10px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 3px;
 }
-.ruricon-icon-pages button {
-  min-width: 44px;
+.ruricon-icon-view .ruricon-icon-pages button {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 50%;
 }
 .ruricon-icon-pages [aria-current="page"] {
-  background: #467ac822;
-  border-color: #467ac8;
+  background: #8882;
+  border-color: transparent;
 }
-.ruricon-icon-count {
-  margin: 8px 0;
+@container (min-width: 600px) {
+  .ruricon-icon-toolbar[data-mobile="false"] {
+    flex-direction: row;
+    align-items: center;
+    gap: 24px;
+  }
+  .ruricon-icon-toolbar[data-mobile="false"] .ruricon-icon-tabs {
+    flex-shrink: 0;
+  }
+  .ruricon-icon-toolbar[data-mobile="false"] .ruricon-icon-pages {
+    margin-left: auto;
+  }
 }
 .ruricon-icon-grid {
   display: grid;
