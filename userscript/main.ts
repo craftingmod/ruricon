@@ -1,5 +1,5 @@
 import { editorPages } from "../entrypoints/lib/constants.ts"
-import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.ts"
+import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.tsx"
 import { main as editorMain } from "../entrypoints/scripts/ruli-editor.ts"
 
 const commentCleanup = mountCommentIconHook()

@@ -1,13 +1,14 @@
 import { compileMain } from "../entrypoints/lib/editor/articleMeta.ts"
 import { loadCollection, loadNativePage, loadPresets } from "../entrypoints/lib/icon-view.ts"
 import { getLastId, readIconImages } from "../entrypoints/lib/ruli-utils.ts"
-import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.ts"
+import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.tsx"
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
 }
 const requests: string[] = []
-const source = (id: number, index: number) => `https://example.com/${id}/${index}.png?icon=${id}`
+const source = (id: number, index: number) =>
+  `https://example.com/${id}/${index}.${id === 5033 && index === 1 ? "mp4" : "png"}?icon=${id}`
 let failSecondPage = true
 let releaseSlow: (() => void) | null = null
 const result = document.querySelector<HTMLElement>("#result")!
@@ -237,18 +238,32 @@ async function check() {
     "Native fetch page renders 100",
   )
   const scrollingGrid = comment.querySelector<HTMLElement>(".ruricon-icon-grid")!
+  const existingVideo = scrollingGrid.querySelector<HTMLVideoElement>("video")!
+  assert(existingVideo?.src === source(5033, 1), "Video keeps the original URL")
   assert(scrollingGrid.scrollHeight > scrollingGrid.clientHeight, "Full page scrolls vertically")
   scrollingGrid.scrollTop = 150
   const favoriteScrollTop = scrollingGrid.scrollTop
   assert(favoriteScrollTop > 0, "Favorite regression starts with a scrolled grid")
   for (const pressed of ["true", "false"]) {
+    const favoriteButton = scrollingGrid.querySelector<HTMLButtonElement>(".ruricon-icon-star")!
+    const existingImage = scrollingGrid.querySelector("img")!
+    favoriteButton.focus({ preventScroll: true })
     click(".ruricon-icon-star", scrollingGrid)
+    assert(scrollingGrid.querySelector("img") === existingImage, "Favorite preserves image DOM")
+    assert(scrollingGrid.querySelector("video") === existingVideo, "Favorite preserves video DOM")
+    assert(document.activeElement === favoriteButton, "Favorite preserves keyboard focus")
     assert(
       scrollingGrid.querySelector(".ruricon-icon-star")!.getAttribute("aria-pressed") === pressed,
       "Favorite toggles while scrolled",
     )
     assert(scrollingGrid.scrollTop === favoriteScrollTop, "Favorite toggle preserves grid scroll")
   }
+  click(".ruricon-icon-insert", existingVideo.closest(".ruricon-icon-tile")!)
+  await tick()
+  assert(
+    comment.querySelector<HTMLImageElement>(".icon_preview")?.src === source(5033, 1),
+    "Video insertion passes the hidden image to the native adapter",
+  )
   assert(comment.querySelectorAll(".ruricon-icon-pages button").length === 3, "Native page count")
   click(".ruricon-icon-pages button:nth-child(2)", comment)
   await tick()
@@ -444,7 +459,7 @@ async function check() {
     JSON.stringify({ presetId: 5033, favorites: storedIcons, recent: storedIcons }),
   )
   const { mountCommentIconHook: mountLimits } = await import(
-    new URL("../entrypoints/scripts/comment-icon.ts?limits", import.meta.url).href
+    new URL("../entrypoints/scripts/comment-icon.tsx?limits", import.meta.url).href
   )
   const cleanupLimits = mountLimits()
   click("button[onclick]", comment)

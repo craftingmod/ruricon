@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 
+import preact from "@preact/preset-vite"
 import { defineConfig } from "vite"
 
 import { mobileDomain, pcDomain } from "./entrypoints/lib/ruli-constants.ts"
@@ -30,6 +31,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    preact({ devToolsEnabled: false, prefreshEnabled: false }),
     {
       name: "userscript-bundle",
       enforce: "post",

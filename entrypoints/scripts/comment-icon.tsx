@@ -1,4 +1,5 @@
-import { ChevronLeft, ChevronRight, createElement, Star } from "lucide"
+import { ChevronLeft, ChevronRight, type IconNode, Star } from "lucide"
+import { h, render as renderView } from "preact"
 
 import {
   loadCollection,
@@ -58,26 +59,46 @@ function button(text: string, click: () => void) {
   return element
 }
 
-function presetLabel(target: HTMLElement, text: string, preset: Preset | null) {
-  const label = document.createElement("span")
-  label.className = "ruricon-preset-label"
-  label.textContent = text
-  target.replaceChildren(label)
+function Icon({ node, size, filled = false }: { node: IconNode; size: number; filled?: boolean }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {node.map(([tag, attrs], index) => h(tag, { ...attrs, key: index }))}
+    </svg>
+  )
+}
+
+function PresetLabel({ text, preset }: { text: string; preset: Preset | null }) {
   const thumbnail = preset?.thumbnail
-  if (!thumbnail || !/^https?:\/\//i.test(thumbnail.src) || !URL.canParse(thumbnail.src)) return
-  const media = document.createElement(thumbnail.type === "video" ? "video" : "img")
-  media.className = "ruricon-preset-thumbnail"
-  media.src = thumbnail.src
-  if (media instanceof HTMLVideoElement) {
-    media.preload = "metadata"
-    media.muted = true
-    media.playsInline = true
-    media.setAttribute("aria-hidden", "true")
-  } else {
-    media.alt = ""
-    media.loading = "lazy"
-  }
-  target.prepend(media)
+  const valid = thumbnail && /^https?:\/\//i.test(thumbnail.src) && URL.canParse(thumbnail.src)
+  return (
+    <>
+      {valid &&
+        (thumbnail.type === "video" ? (
+          <video
+            class="ruricon-preset-thumbnail"
+            src={thumbnail.src}
+            preload="metadata"
+            muted
+            playsInline
+            aria-hidden="true"
+          />
+        ) : (
+          <img class="ruricon-preset-thumbnail" src={thumbnail.src} alt="" loading="lazy" />
+        ))}
+      <span class="ruricon-preset-label">{text}</span>
+    </>
+  )
 }
 
 function choosePreset(
@@ -90,56 +111,65 @@ function choosePreset(
   if (!dialog) {
     dialog = document.createElement("dialog")
     dialog.className = "ruricon-preset-dialog"
+    dialog.setAttribute("aria-labelledby", "ruricon-preset-title")
     document.body.append(dialog)
   }
   const modal = dialog
-  const heading = document.createElement("div")
-  heading.className = "ruricon-preset-heading"
-  const title = document.createElement("strong")
-  title.id = "ruricon-preset-title"
-  title.textContent = "프리셋 선택"
-  modal.setAttribute("aria-labelledby", title.id)
-  heading.append(
-    title,
-    button("닫기", () => modal.close()),
-  )
-  const search = document.createElement("input")
-  search.type = "search"
-  search.placeholder = "프리셋 이름 검색…"
-  search.setAttribute("aria-label", "프리셋 이름 검색")
-  const list = document.createElement("div")
-  list.className = "ruricon-preset-list"
-  const render = () => {
-    list.replaceChildren()
-    for (const preset of presets.filter((preset) => matchesPreset(preset.title, search.value))) {
-      const row = button(
-        `${preset.id === selected ? "✓ " : ""}${preset.title}${preset.imageCount === undefined ? "" : ` · ${preset.imageCount}개`}`,
-        () => {
-          modal.close()
-          choose(preset)
-        },
-      )
-      presetLabel(row, row.textContent ?? "", preset)
-      if (preset.id === selected) row.setAttribute("aria-current", "true")
-      list.append(row)
-    }
-    if (!list.children.length)
-      list.textContent = presets.length
-        ? "검색 결과가 없습니다."
-        : "등록된 아이콘팩 즐겨찾기가 없습니다."
+  let query = ""
+  const draw = () => {
+    const filtered = presets.filter((preset) => matchesPreset(preset.title, query))
+    renderView(
+      <>
+        <div class="ruricon-preset-heading">
+          <strong id="ruricon-preset-title">프리셋 선택</strong>
+          <button type="button" onClick={() => modal.close()}>
+            닫기
+          </button>
+        </div>
+        <input
+          type="search"
+          placeholder="프리셋 이름 검색…"
+          aria-label="프리셋 이름 검색"
+          onInput={(event) => {
+            query = event.currentTarget.value
+            draw()
+          }}
+        />
+        <div class="ruricon-preset-list">
+          {filtered.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              aria-current={preset.id === selected ? "true" : undefined}
+              onClick={() => {
+                modal.close()
+                choose(preset)
+              }}
+            >
+              <PresetLabel
+                preset={preset}
+                text={`${preset.id === selected ? "✓ " : ""}${preset.title}${preset.imageCount === undefined ? "" : ` · ${preset.imageCount}개`}`}
+              />
+            </button>
+          ))}
+          {!filtered.length &&
+            (presets.length ? "검색 결과가 없습니다." : "등록된 아이콘팩 즐겨찾기가 없습니다.")}
+        </div>
+      </>,
+      modal,
+    )
   }
-  search.addEventListener("input", render)
   modal.onclose = () => {
     if (!modal.open) {
-      search.value = ""
+      modal.querySelector<HTMLInputElement>("input")!.value = ""
       opener.focus()
     }
   }
-  modal.replaceChildren(heading, search, list)
-  render()
+  draw()
+  modal.querySelector<HTMLInputElement>("input")!.value = ""
   opener.focus()
   modal.showModal()
-  search.focus()
+  modal.querySelector<HTMLInputElement>("input")!.focus()
 }
 
 export function openRuriconIconView(container: HTMLElement) {
@@ -190,27 +220,13 @@ export function openRuriconIconView(container: HTMLElement) {
     renderShortcuts()
   })
   previous.setAttribute("aria-label", "이전 프리셋 페이지")
-  previous.append(
-    createElement(ChevronLeft, {
-      width: 20,
-      height: 20,
-      "aria-hidden": "true",
-      focusable: "false",
-    }),
-  )
+  renderView(<Icon node={ChevronLeft} size={20} />, previous)
   const next = button("", () => {
     shortcutPage++
     renderShortcuts()
   })
   next.setAttribute("aria-label", "다음 프리셋 페이지")
-  next.append(
-    createElement(ChevronRight, {
-      width: 20,
-      height: 20,
-      "aria-hidden": "true",
-      focusable: "false",
-    }),
-  )
+  renderView(<Icon node={ChevronRight} size={20} />, next)
   previous.className = next.className = "ruricon-preset-arrow"
   if (mobile) shortcuts.append(strip)
   else shortcuts.append(previous, strip, next)
@@ -228,6 +244,7 @@ export function openRuriconIconView(container: HTMLElement) {
       busy = false
       mode = value
       pageIndex = 0
+      grid.scrollTop = 0
       status.textContent = ""
       retry.hidden = true
       render()
@@ -250,12 +267,6 @@ export function openRuriconIconView(container: HTMLElement) {
   container.style.display = "block"
 
   function renderShortcuts() {
-    const scrollLeft = strip.scrollLeft
-    const focusedId =
-      document.activeElement instanceof HTMLButtonElement &&
-      document.activeElement.parentElement === strip
-        ? document.activeElement.dataset.presetId
-        : undefined
     const style = getComputedStyle(strip)
     const size = parseFloat(style.getPropertyValue("--ruricon-preset-shortcut-size"))
     const gap = parseFloat(style.columnGap)
@@ -269,27 +280,30 @@ export function openRuriconIconView(container: HTMLElement) {
     previous.disabled = shortcutPage === 0
     next.disabled = shortcutPage >= pageCount - 1
     shortcuts.hidden = !presets.length
-    strip.replaceChildren()
     const visible = mobile
       ? presets
       : presets.slice(shortcutPage * shortcutCapacity, (shortcutPage + 1) * shortcutCapacity)
-    for (const preset of visible) {
-      const shortcut = button("", () => {
-        void selectPreset(preset)
-      })
-      shortcut.className = "ruricon-preset-shortcut"
-      shortcut.dataset.presetId = String(preset.id)
-      shortcut.title = preset.title
-      shortcut.setAttribute("aria-label", preset.title)
-      shortcut.setAttribute("aria-pressed", String(preset.id === selected?.id))
-      presetLabel(shortcut, preset.title, preset)
-      strip.append(shortcut)
-    }
-    if (mobile) strip.scrollLeft = scrollLeft
-    if (focusedId)
-      strip
-        .querySelector<HTMLButtonElement>(`[data-preset-id="${focusedId}"]`)
-        ?.focus({ preventScroll: true })
+    renderView(
+      <>
+        {visible.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            class="ruricon-preset-shortcut"
+            data-preset-id={preset.id}
+            title={preset.title}
+            aria-label={preset.title}
+            aria-pressed={preset.id === selected?.id}
+            onClick={() => {
+              void selectPreset(preset)
+            }}
+          >
+            <PresetLabel text={preset.title} preset={preset} />
+          </button>
+        ))}
+      </>,
+      strip,
+    )
   }
 
   const shortcutObserver =
@@ -323,103 +337,116 @@ export function openRuriconIconView(container: HTMLElement) {
         : collection?.nativeId !== null
           ? (nativePages.get(pageIndex) ?? [])
           : (collection.pages[pageIndex]?.images ?? [])
-    presetLabel(
+    renderView(
+      <PresetLabel
+        text={
+          collection
+            ? `${collection.title} · ${collection.pages[0]?.total ?? 0}개 · 프리셋 변경 ▾`
+            : (selected?.title ?? "프리셋 선택 ▾")
+        }
+        preset={selected}
+      />,
       select,
-      collection
-        ? `${collection.title} · ${collection.pages[0]?.total ?? 0}개 · 프리셋 변경 ▾`
-        : (selected?.title ?? "프리셋 선택 ▾"),
-      selected,
     )
-    pages.replaceChildren()
     pages.hidden = mode !== "all"
-    for (let index = 0; index < pageCount; index++) {
-      const number =
-        mode === "all" && collection?.nativeId === null ? collection.pages[index].number : index + 1
-      const pageButton = button(String(number), () => {
-        void changePage(index)
-      })
-      pageButton.setAttribute("aria-label", `${number}페이지`)
-      if (index === pageIndex) pageButton.setAttribute("aria-current", "page")
-      pages.append(pageButton)
-    }
+    renderView(
+      <>
+        {Array.from({ length: pageCount }, (_, index) => {
+          const number = collection?.nativeId === null ? collection.pages[index].number : index + 1
+          return (
+            <button
+              key={number}
+              type="button"
+              aria-label={`${number}페이지`}
+              aria-current={index === pageIndex ? "page" : undefined}
+              onClick={() => {
+                void changePage(index)
+              }}
+            >
+              {number}
+            </button>
+          )
+        })}
+      </>,
+      pages,
+    )
     count.textContent = `${mode === "all" ? "아이콘 목록" : mode === "favorites" ? "즐겨찾기" : "최근 사용"} · ${total}개${pageCount ? ` · ${images.length}개 표시` : ""}`
     panel.setAttribute("aria-busy", String(busy))
-    grid.replaceChildren()
-    for (const [index, src] of images.entries()) {
-      const tile = document.createElement("div")
-      tile.className = "ruricon-icon-tile"
-      const image = document.createElement("img")
-      image.src = src
-      image.alt = `아이콘 ${index + 1}`
-      image.loading = "lazy"
-      const insert = button("", async () => {
-        try {
-          const wrapper = image.closest(".common_write_wrapper")
-          if (!wrapper || typeof window.app?.select_icon !== "function")
-            throw new Error("댓글 입력창을 찾을 수 없습니다.")
-          await window.app.select_icon(image)
-          if (
-            !Array.from(
-              wrapper.querySelectorAll<HTMLImageElement | HTMLVideoElement>(".icon_preview"),
-            ).some((preview) => preview.src === image.src)
-          )
-            throw new Error("아이콘 미리보기를 만들지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
-          prefs.recent = [src, ...prefs.recent.filter((url) => url !== src)].slice(
-            0,
-            localIconLimit,
-          )
-          status.textContent = "아이콘을 댓글 입력창에 전달했습니다."
-          persist(status)
-          if (mode === "recent") render()
-        } catch (error) {
-          status.textContent =
-            error instanceof Error ? error.message : "아이콘을 삽입하지 못했습니다."
-        }
-      })
-      insert.className = "ruricon-icon-insert"
-      insert.setAttribute("aria-label", `아이콘 ${index + 1} 삽입`)
-      insert.append(image)
-      if (src.includes(".mp4")) {
-        image.style.display = "none"
-        const video = document.createElement("video")
-        video.src = src
-        video.preload = "metadata"
-        video.muted = true
-        video.playsInline = true
-        video.setAttribute("aria-hidden", "true")
-        insert.append(video)
-      }
-      const favorite = button("", () => {
-        if (!prefs.favorites.includes(src) && prefs.favorites.length >= localIconLimit) {
-          status.textContent = `즐겨찾기는 최대 ${localIconLimit}개까지 저장할 수 있습니다.`
-          return
-        }
-        const scrollTop = grid.scrollTop
-        prefs.favorites = prefs.favorites.includes(src)
-          ? prefs.favorites.filter((url) => url !== src)
-          : [...prefs.favorites, src]
-        persist(status)
-        render()
-        grid.scrollTop = scrollTop
-      })
-      favorite.className = "ruricon-icon-star"
-      favorite.setAttribute("aria-label", "즐겨찾기 추가/제거")
-      favorite.setAttribute("aria-pressed", String(prefs.favorites.includes(src)))
-      favorite.append(
-        createElement(Star, {
-          width: 16,
-          height: 16,
-          fill: prefs.favorites.includes(src) ? "currentColor" : "none",
-          "aria-hidden": "true",
-          focusable: "false",
-        }),
-      )
-      tile.append(insert, favorite)
-      grid.append(tile)
-    }
-    if (!images.length && !busy) grid.textContent = "표시할 아이콘이 없습니다."
-    grid.scrollTop = 0
+    renderView(
+      <>
+        {images.map((src, index) => (
+          <div key={src} class="ruricon-icon-tile">
+            <button
+              type="button"
+              class="ruricon-icon-insert"
+              aria-label={`아이콘 ${index + 1} 삽입`}
+              onClick={(event) => {
+                void insertIcon(event.currentTarget.querySelector("img")!, src)
+              }}
+            >
+              <img
+                src={src}
+                alt={`아이콘 ${index + 1}`}
+                loading="lazy"
+                style={src.includes(".mp4") ? { display: "none" } : undefined}
+              />
+              {src.includes(".mp4") && (
+                <video src={src} preload="metadata" muted playsInline aria-hidden="true" />
+              )}
+            </button>
+            <button
+              type="button"
+              class="ruricon-icon-star"
+              aria-label="즐겨찾기 추가/제거"
+              aria-pressed={prefs.favorites.includes(src)}
+              onClick={() => {
+                if (!prefs.favorites.includes(src) && prefs.favorites.length >= localIconLimit) {
+                  status.textContent = `즐겨찾기는 최대 ${localIconLimit}개까지 저장할 수 있습니다.`
+                  return
+                }
+                const scrollTop = grid.scrollTop
+                prefs.favorites = prefs.favorites.includes(src)
+                  ? prefs.favorites.filter((url) => url !== src)
+                  : [...prefs.favorites, src]
+                persist(status)
+                render()
+                grid.scrollTop = scrollTop
+              }}
+            >
+              <Icon node={Star} size={16} filled={prefs.favorites.includes(src)} />
+            </button>
+          </div>
+        ))}
+        {!images.length && !busy && "표시할 아이콘이 없습니다."}
+      </>,
+      grid,
+    )
     if (focusPage) pages.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus()
+  }
+
+  async function insertIcon(image: HTMLImageElement, src: string) {
+    try {
+      const wrapper = image.closest(".common_write_wrapper")
+      if (!wrapper || typeof window.app?.select_icon !== "function")
+        throw new Error("댓글 입력창을 찾을 수 없습니다.")
+      await window.app.select_icon(image)
+      if (disposed) return
+      if (
+        !Array.from(
+          wrapper.querySelectorAll<HTMLImageElement | HTMLVideoElement>(".icon_preview"),
+        ).some((preview) => preview.src === image.src)
+      )
+        throw new Error("아이콘 미리보기를 만들지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
+      const prefs = preferences()
+      prefs.recent = [src, ...prefs.recent.filter((url) => url !== src)].slice(0, localIconLimit)
+      status.textContent = "아이콘을 댓글 입력창에 전달했습니다."
+      persist(status)
+      if (mode === "recent") render()
+    } catch (error) {
+      if (!disposed)
+        status.textContent =
+          error instanceof Error ? error.message : "아이콘을 삽입하지 못했습니다."
+    }
   }
 
   async function request(
@@ -454,6 +481,7 @@ export function openRuriconIconView(container: HTMLElement) {
     mode = "all"
     pageIndex = 0
     collection = null
+    grid.scrollTop = 0
     nativePages = new Map()
     let result: IconCollection
     await request(
@@ -473,6 +501,7 @@ export function openRuriconIconView(container: HTMLElement) {
 
   async function changePage(index: number) {
     pageIndex = index
+    grid.scrollTop = 0
     if (mode !== "all" || !collection?.nativeId || nativePages.has(index)) {
       revision++
       busy = false
@@ -521,6 +550,7 @@ export function openRuriconIconView(container: HTMLElement) {
       disposed = true
       shortcutObserver?.disconnect()
       revision++
+      for (const root of [select, strip, pages, grid, previous, next]) renderView(null, root)
       panel.remove()
       views.delete(container)
     },
@@ -557,6 +587,7 @@ export function mountCommentIconHook() {
   return () => {
     document.removeEventListener("click", onClick, true)
     for (const view of views.values()) view.destroy()
+    if (dialog) renderView(null, dialog)
     dialog?.remove()
     dialog = null
   }

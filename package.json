@@ -23,6 +23,7 @@
     "validate": "bun run lint && bun run fmt:check"
   },
   "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
     "@types/jquery": "^4.0.1",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
@@ -33,6 +34,7 @@
     "wxt": "^0.21.3"
   },
   "dependencies": {
-    "lucide": "^1.54.0"
+    "lucide": "^1.54.0",
+    "preact": "^11.0.1"
   }
 }

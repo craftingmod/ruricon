@@ -1,9 +1,15 @@
-import { defineConfig } from "wxt"
 import { resolve } from "node:path"
+
+import preact from "@preact/preset-vite"
+import { defineConfig } from "wxt"
+
 import { chromeExec, editorPages } from "./entrypoints/lib/constants.ts"
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
+  vite: () => ({
+    plugins: [preact({ devToolsEnabled: false, prefreshEnabled: false })],
+  }),
   webExt: {
     binaries: {
       chrome: chromeExec, // Use Chrome Beta instead of regular Chrome

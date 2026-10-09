@@ -4,6 +4,10 @@
 
 ## 빌드
 
+댓글 아이콘 선택 UI는 Preact를 사용합니다. WXT와 Userscript의 Vite 설정에
+`@preact/preset-vite`를 연결하고, TypeScript JSX runtime은 `preact`로 지정합니다.
+MAIN world에서 페이지의 댓글 기능과 연동하므로 Preact DevTools와 Prefresh는 비활성화합니다.
+
 ```sh
 bun install
 bun run build             # Chrome MV3: .output/chrome-mv3/
