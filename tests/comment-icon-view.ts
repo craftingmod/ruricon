@@ -1,3 +1,5 @@
+import { act } from "preact/test-utils"
+
 import { compileMain } from "../entrypoints/lib/editor/articleMeta.ts"
 import { loadCollection, loadNativePage, loadPresets } from "../entrypoints/lib/icon-view.ts"
 import { getLastId, readIconImages } from "../entrypoints/lib/ruli-utils.ts"
@@ -11,6 +13,7 @@ const source = (id: number, index: number) =>
   `https://example.com/${id}/${index}.${id === 5033 && index === 1 ? "mp4" : "png"}?icon=${id}`
 let failSecondPage = true
 let releaseSlow: (() => void) | null = null
+let releaseInsert: (() => void) | null = null
 const result = document.querySelector<HTMLElement>("#result")!
 const originalFetch = window.fetch
 let nativeCalls = 0
@@ -115,14 +118,16 @@ const waitFor = async (predicate: () => boolean) => {
 const click = (selector: string, parent: ParentNode = document) => {
   const element = parent.querySelector<HTMLElement>(selector)
   assert(element, `Missing ${selector}`)
-  element.click()
+  void act(() => element.click())
   return element
 }
 async function choose(name: string, parent: ParentNode = document.querySelector("#comment")!) {
   click(".ruricon-preset-select", parent)
   const search = document.querySelector<HTMLInputElement>("dialog input")!
   search.value = name
-  search.dispatchEvent(new Event("input"))
+  void act(() => {
+    search.dispatchEvent(new Event("input"))
+  })
   click("dialog .ruricon-preset-list button")
   await tick()
 }
@@ -272,7 +277,7 @@ async function check() {
   const retry = [...comment.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "다시 시도",
   )!
-  retry.click()
+  void act(() => retry.click())
   await tick()
   assert(
     comment.querySelectorAll(".ruricon-icon-grid img").length === 100,
@@ -312,6 +317,32 @@ async function check() {
   await tick()
   const mobileGrid = reply.querySelector<HTMLElement>(".ruricon-icon-grid")!
   assert(mobileGrid.scrollWidth <= mobileGrid.clientWidth, "Narrow reply grid fits horizontally")
+  for (const pressed of ["true", "false"]) {
+    click(".ruricon-icon-star", reply)
+    assert(
+      comment.querySelector(".ruricon-icon-star")!.getAttribute("aria-pressed") === pressed,
+      "Comment and reply react to shared favorites",
+    )
+  }
+  const setItem = Storage.prototype.setItem
+  try {
+    Storage.prototype.setItem = () => {
+      throw new Error("Storage unavailable")
+    }
+    click(".ruricon-icon-star", reply)
+    assert(
+      comment.querySelector(".ruricon-icon-star")!.getAttribute("aria-pressed") === "true" &&
+        reply.querySelector('[role="status"]')!.textContent!.includes("저장할 수 없습니다"),
+      "Storage failure keeps shared in-memory state and reports the failure",
+    )
+  } finally {
+    Storage.prototype.setItem = setItem
+  }
+  click(".ruricon-icon-star", reply)
+  assert(
+    !reply.querySelector('[role="status"]')!.textContent!.includes("저장할 수 없습니다"),
+    "Successful persistence clears the storage failure",
+  )
   click(".ruricon-preset-select", reply)
   const modal = document.querySelector<HTMLDialogElement>("dialog")!
   assert(modal.open, "Native dialog opens")
@@ -325,7 +356,9 @@ async function check() {
   const hangulSearch = modal.querySelector<HTMLInputElement>("input")!
   for (const query of ["냐", "ㄴㄴ"]) {
     hangulSearch.value = query
-    hangulSearch.dispatchEvent(new Event("input"))
+    void act(() => {
+      hangulSearch.dispatchEvent(new Event("input"))
+    })
     assert(
       modal.querySelectorAll(".ruricon-preset-list button").length === 1,
       "Hangul composition and choseong filter preset rows",
@@ -349,6 +382,11 @@ async function check() {
   click("button[onclick]", reply)
   assert(!reply.querySelector<HTMLElement>(".comment_icon")!.hidden, "Toggle reopens panel")
   assert(document.querySelectorAll("dialog").length === 1, "Shared single dialog")
+  click(".ruricon-preset-select", comment)
+  assert(document.querySelector("dialog") === modal, "Comment and reply reuse one native dialog")
+  assert(modal.querySelector<HTMLInputElement>("input")!.value === "", "Reopening resets search")
+  click(".ruricon-preset-heading button", modal)
+  assert(!modal.open, "Dialog button closes the controlled modal")
   const shortcutRow = reply.querySelector<HTMLElement>(".ruricon-preset-shortcuts")!
   const strip = shortcutRow.querySelector<HTMLElement>(".ruricon-preset-strip")!
   const shortcut = strip.querySelector<HTMLElement>(".ruricon-preset-shortcut")!
@@ -390,24 +428,24 @@ async function check() {
       )
       assert(getComputedStyle(arrow).borderWidth === "0px", "Page arrows have no border")
     }
-    arrows[0].click()
+    void act(() => arrows[0].click())
     assert(arrows[0].disabled && !arrows[1].disabled, "Desktop first page has only next enabled")
     assert(strip.scrollWidth <= strip.clientWidth, "Desktop fits whole thumbnails in one row")
     const firstId = strip.firstElementChild?.getAttribute("data-preset-id")
     const beforePaging = requests.length
-    arrows[1].click()
+    void act(() => arrows[1].click())
     assert(
       strip.firstElementChild?.getAttribute("data-preset-id") !== firstId,
       "Desktop arrows change thumbnail page",
     )
     assert(requests.length === beforePaging, "Shortcut paging doesn't fetch collections")
-    while (!arrows[1].disabled) arrows[1].click()
+    while (!arrows[1].disabled) void act(() => arrows[1].click())
     assert(arrows[1].disabled, "Last shortcut page disables next")
     ;(reply as HTMLElement).style.maxWidth = "240px"
-    arrows[0].click()
+    void act(() => arrows[0].click())
     assert(strip.children.length === 1, "Narrow desktop page fits one 80px thumbnail")
     assert(strip.scrollWidth <= strip.clientWidth, "Resize recomputes desktop page capacity")
-    while (!arrows[0].disabled) arrows[0].click()
+    while (!arrows[0].disabled) void act(() => arrows[0].click())
     shortcutRow.style.setProperty("--ruricon-preset-shortcut-size", "100px")
     click('[data-preset-id="900"]', strip)
     await tick()
@@ -449,7 +487,7 @@ async function check() {
   assert(requests.length === beforeNewPage + 1, "Concurrent requests share one fetch")
   await loadNativePage(5033, 200)
   await readIconImages(5033, 200)
-  cleanup()
+  void act(cleanup)
   assert(!document.querySelector(".ruricon-icon-view, dialog"), "Unmount cleans views and dialog")
   click("button[onclick]", reply)
   assert(Number(nativeCalls) === 1, "Cleanup restores native button")
@@ -515,7 +553,34 @@ async function check() {
       comment.querySelector(".ruricon-icon-star")!.getAttribute("aria-pressed") === "true",
     "Favorite can be added after freeing a slot",
   )
-  cleanupLimits()
+  click(".ruricon-icon-star", comment)
+  const nativeStars = comment.querySelectorAll<HTMLButtonElement>(".ruricon-icon-star")
+  void act(() => {
+    nativeStars[0].click()
+    nativeStars[1].click()
+  })
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).favorites.length === 1000,
+    "Batched favorite additions cannot exceed the limit",
+  )
+  const storedBeforeUnmount = localStorage.getItem("ruricon:icon-view:v1")
+  window.app.select_icon = async (image) => {
+    void selectIcon(image)
+    await new Promise<void>((resolve) => {
+      releaseInsert = resolve
+    })
+  }
+  click(".ruricon-icon-tile:nth-child(2) .ruricon-icon-insert", comment)
+  assert(releaseInsert, "Native insertion is pending")
+  void act(cleanupLimits)
+  releaseInsert()
+  await tick()
+  window.app.select_icon = selectIcon
+  assert(
+    localStorage.getItem("ruricon:icon-view:v1") === storedBeforeUnmount &&
+      !document.querySelector(".ruricon-icon-view, dialog"),
+    "Unmount ignores late insertion completion",
+  )
   result.textContent =
     "PASS: API parsing, segment/native pages, URL preservation, favorites/recent, retry, races, comment/reply ownership and cleanup"
   result.dataset.result = "PASS"

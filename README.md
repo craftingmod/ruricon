@@ -7,6 +7,8 @@
 댓글 아이콘 선택 UI는 Preact를 사용합니다. WXT와 Userscript의 Vite 설정에
 `@preact/preset-vite`를 연결하고, TypeScript JSX runtime은 `preact`로 지정합니다.
 MAIN world에서 페이지의 댓글 기능과 연동하므로 Preact DevTools와 Prefresh는 비활성화합니다.
+열린 댓글/답글 패널과 저장 설정은 하나의 앱에서 관리하며, 패널·프리셋 목록·다이얼로그는
+hooks로 상태를 관리합니다. 루리웹의 기존 댓글 영역에는 portal로 UI를 표시합니다.
 
 ```sh
 bun install
