@@ -1,7 +1,16 @@
+import { editorPages } from "../entrypoints/lib/constants.ts"
+import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.ts"
 import { main as editorMain } from "../entrypoints/scripts/ruli-editor.ts"
 
-void editorMain().then((cleanup) => {
+const commentCleanup = mountCommentIconHook()
+const isEditor = editorPages.some((page) =>
+  location.href.split(/[?#]/)[0].startsWith(page.replace("*", "")),
+)
+void (isEditor ? editorMain() : Promise.resolve(() => {})).then((cleanup) => {
   window.addEventListener("pagehide", (event) => {
-    if (!event.persisted) cleanup()
+    if (!event.persisted) {
+      cleanup()
+      commentCleanup()
+    }
   })
 })

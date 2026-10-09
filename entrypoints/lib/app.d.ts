@@ -1,3 +1,3 @@
 interface App {
-  select_icon: (img: string) => void
+  select_icon: (img: HTMLImageElement) => void | Promise<void>
 }

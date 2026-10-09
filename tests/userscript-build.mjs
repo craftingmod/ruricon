@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { runInNewContext } from "node:vm"
 
-import { editorPages } from "../entrypoints/lib/constants.ts"
+import { mobileDomain, pcDomain } from "../entrypoints/lib/ruli-constants.ts"
 
 const output = new URL("../.output/userscript/", import.meta.url)
 assert.deepEqual(readdirSync(output), ["rulicon.user.js"])
@@ -12,7 +12,7 @@ assert.ok(code.startsWith("// ==UserScript==\n"))
 assert.ok(code.includes(`// @version ${version}\n`))
 assert.deepEqual(
   [...code.matchAll(/^\/\/ @match (.+)$/gm)].map((match) => match[1]),
-  editorPages,
+  [pcDomain, mobileDomain].map((domain) => `https://${domain}/*`),
 )
 assert.ok(code.includes("// @grant none\n"))
 assert.ok(code.includes("// @sandbox raw\n"))
@@ -24,12 +24,15 @@ const listeners = new Map()
 runInNewContext(code, {
   console: { log() {} },
   document: {
+    addEventListener() {},
+    removeEventListener() {},
     querySelector: () => null,
     createElement: () => ({ style: {}, addEventListener() {} }),
     head: { append: (style) => styles.push(style) },
     body: { append: (button) => buttons.push(button) },
   },
   window: { addEventListener: (name, callback) => listeners.set(name, callback) },
+  location: { href: "https://bbs.ruliweb.com/community/board/98/write" },
 })
 await Promise.resolve()
 assert.equal(styles.length, 1)

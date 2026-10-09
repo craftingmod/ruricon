@@ -1,0 +1,142 @@
+.ruricon-icon-view {
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #aaa6;
+  border-radius: 10px;
+  background: Canvas;
+  color: CanvasText;
+  font: 14px/1.5 sans-serif;
+}
+.ruricon-icon-view button,
+.ruricon-preset-dialog button,
+.ruricon-preset-dialog input {
+  box-sizing: border-box;
+  font: inherit;
+  color: inherit;
+}
+.ruricon-icon-view button,
+.ruricon-preset-dialog button {
+  min-height: 44px;
+  border: 1px solid #aaa6;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.ruricon-icon-view button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ruricon-icon-view button:focus-visible,
+.ruricon-preset-dialog :focus-visible {
+  outline: 2px solid #467ac8;
+  outline-offset: 2px;
+}
+.ruricon-icon-view [aria-pressed="true"],
+.ruricon-preset-dialog [aria-current="true"] {
+  background: #467ac822;
+  border-color: #467ac8;
+}
+.ruricon-preset-select {
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px 12px;
+  text-align: left;
+}
+.ruricon-icon-tabs,
+.ruricon-preset-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ruricon-icon-tabs button {
+  flex: 1;
+}
+.ruricon-icon-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0;
+}
+.ruricon-icon-pages button {
+  min-width: 44px;
+}
+.ruricon-icon-pages [aria-current="page"] {
+  background: #467ac822;
+  border-color: #467ac8;
+}
+.ruricon-icon-count {
+  margin: 8px 0;
+}
+.ruricon-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  gap: 5px;
+  max-height: min(50dvh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+}
+.ruricon-icon-tile {
+  position: relative;
+  min-width: 0;
+}
+.ruricon-icon-view .ruricon-icon-insert {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+}
+.ruricon-icon-view .ruricon-icon-insert img,
+.ruricon-icon-view .ruricon-icon-insert video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  margin: 0;
+}
+.ruricon-icon-view .ruricon-icon-star {
+  width: 100%;
+  min-height: 24px;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.ruricon-preset-dialog {
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 24px));
+  max-height: 80dvh;
+  padding: 16px;
+  border: 1px solid #aaa;
+  border-radius: 12px;
+  background: Canvas;
+  color: CanvasText;
+  font: 14px/1.5 sans-serif;
+}
+.ruricon-preset-dialog::backdrop {
+  background: #0006;
+}
+.ruricon-preset-heading {
+  justify-content: space-between;
+}
+.ruricon-preset-dialog input {
+  width: 100%;
+  padding: 10px;
+  margin: 12px 0;
+}
+.ruricon-preset-list {
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+.ruricon-preset-list button {
+  display: block;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px;
+  text-align: left;
+  margin-bottom: 6px;
+}
+@media (max-width: 480px) {
+  .ruricon-icon-view {
+    padding: 8px;
+  }
+}

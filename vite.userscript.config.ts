@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 
 import { defineConfig } from "vite"
 
-import { editorPages } from "./entrypoints/lib/constants.ts"
+import { mobileDomain, pcDomain } from "./entrypoints/lib/ruli-constants.ts"
 
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
 const metadata = [
@@ -11,7 +11,7 @@ const metadata = [
   "// @namespace rulicon",
   `// @version ${version}`,
   "// @description Ruliweb icon editor tools",
-  ...editorPages.map((page) => `// @match ${page}`),
+  ...[pcDomain, mobileDomain].map((domain) => `// @match https://${domain}/*`),
   "// @run-at document-idle",
   "// @grant none",
   "// @sandbox raw",

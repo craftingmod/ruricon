@@ -195,6 +195,7 @@ async function requestGet<T>(url: string) {
     method: "get",
     mode: "cors",
     redirect: "follow",
+    credentials: "include",
   })
   if (rawRequest.status !== 200) {
     throw new Error(`Server status error: ${rawRequest.status}`)
@@ -203,14 +204,9 @@ async function requestGet<T>(url: string) {
 }
 
 export function getLastId(str: string) {
-  const id = Number(str.substring(
-    str.lastIndexOf(",") + 1,
-    str.lastIndexOf(");") - 1
-  ).trim())
-  if (Number.isNaN(id)) {
-    return null
-  }
-  return id
+  const match = str.match(/,\s*["']?(\d+)["']?\s*\)\s*;?\s*$/)
+  const id = match ? Number(match[1]) : 0
+  return Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
 /**
@@ -218,8 +214,8 @@ export function getLastId(str: string) {
  */
 export async function readIconFavorite() {
   const json = await requestGet<{
-    success: boolean,
-    html: string,
+    success: boolean
+    html: string
   }>(iconListUrl)
 
   if (!(json.success ?? false)) {
@@ -229,57 +225,56 @@ export async function readIconFavorite() {
   const parser = new DOMParser()
   const $ = parser.parseFromString(json.html, "text/html")
   const iconElements = Array.from(
-    $.querySelectorAll<HTMLDivElement>(":scope > div:last-child > div:first-of-type > div")
-  ).map((div) => {
-    const outDOM = div.querySelector<HTMLDivElement>(":scope > div")!
-
-    const onClickScript = outDOM.getAttribute("onclick")
-    if (onClickScript == null) {
-      console.error(`[RuliUtil] Icon onClick is null. DOM: ${outDOM.outerHTML}`)
-      return null
-    }
-
-    const iconId = getLastId(onClickScript)
-    if (iconId == null) {
-      console.error(`[RuliUtil] Icon script is unknown. onClick: ${onClickScript}`)
-      return null
-    }
-
-    const iconTitle = outDOM.getAttribute("title") ?? "Unknown Title"
-
-    const thumbnail = Object.create(null) as {
-      type: "image" | "video",
-      src: string,
-    }
-
-    const imageDOM = outDOM.querySelector<HTMLImageElement>("img")
-    if (imageDOM == null) {
-      const videoDOM = outDOM.querySelector<HTMLVideoElement>("video")
-      if (videoDOM == null) {
-        console.error(`[RuliUtil] Icon thumbnail is unknown. dom: ${outDOM.outerHTML}`)
+    $.querySelectorAll<HTMLDivElement>('[onclick*="app.icon_data_show("][title]'),
+  )
+    .map((outDOM) => {
+      const onClickScript = outDOM.getAttribute("onclick")
+      if (onClickScript == null) {
+        console.error(`[RuliUtil] Icon onClick is null. DOM: ${outDOM.outerHTML}`)
         return null
       }
-      thumbnail.src = videoDOM.getAttribute("src") ?? ""
 
-      // mp4 auto convert
-      if (thumbnail.src.endsWith(".mp4?gif")) {
-        thumbnail.src = thumbnail.src.replace(".mp4?gif", ".gif")
-        thumbnail.type = "image"
-      } else {
-        thumbnail.type = "video"
+      const iconId = getLastId(onClickScript)
+      if (iconId == null) {
+        console.error(`[RuliUtil] Icon script is unknown. onClick: ${onClickScript}`)
+        return null
       }
 
-    } else {
-      thumbnail.type = "image"
-      thumbnail.src = imageDOM.getAttribute("src") ?? ""
-    }
+      const iconTitle = outDOM.getAttribute("title") ?? "Unknown Title"
 
-    return {
-      iconId,
-      iconTitle,
-      thumbnail,
-    }
-  }).filter((v) => v != null)
+      const thumbnail = Object.create(null) as {
+        type: "image" | "video"
+        src: string
+      }
+
+      const imageDOM = outDOM.querySelector<HTMLImageElement>("img")
+      if (imageDOM == null) {
+        const videoDOM = outDOM.querySelector<HTMLVideoElement>("video")
+        if (videoDOM == null) {
+          console.error(`[RuliUtil] Icon thumbnail is unknown. dom: ${outDOM.outerHTML}`)
+          return null
+        }
+        thumbnail.src = videoDOM.getAttribute("src") ?? ""
+
+        // mp4 auto convert
+        if (thumbnail.src.endsWith(".mp4?gif")) {
+          thumbnail.src = thumbnail.src.replace(".mp4?gif", ".gif")
+          thumbnail.type = "image"
+        } else {
+          thumbnail.type = "video"
+        }
+      } else {
+        thumbnail.type = "image"
+        thumbnail.src = imageDOM.getAttribute("src") ?? ""
+      }
+
+      return {
+        iconId,
+        iconTitle,
+        thumbnail,
+      }
+    })
+    .filter((v) => v != null)
 
   // Remove forced AD icon
   iconElements.splice(0, 2)
@@ -297,11 +292,11 @@ export async function readIconFavorite() {
 export async function readIconImages(iconId: number, offset = 0, limit = 100) {
   const requestUrl = getIconImagesUrl(iconId, offset, limit)
   const json = await requestGet<{
-    success: boolean,
-    html: string,
-    has_more: boolean,
-    next_offset: number,
-    total_count: number,
+    success: boolean
+    html: string
+    has_more: boolean
+    next_offset: number
+    total_count: number
   }>(requestUrl)
 
   if (!(json.success ?? false)) {
@@ -311,28 +306,36 @@ export async function readIconImages(iconId: number, offset = 0, limit = 100) {
   const parser = new DOMParser()
   const $ = parser.parseFromString(json.html, "text/html")
 
-  const firstInfoDOM = $.querySelector<HTMLDivElement>(":scope > div:first-of-type")!
+  const firstInfoDOM = $.body.querySelector<HTMLDivElement>(":scope > div:first-of-type")
+  if (!firstInfoDOM && offset === 0) throw new Error("아이콘팩 정보를 찾을 수 없습니다.")
 
-  const title = firstInfoDOM.querySelector(":scope > a")?.textContent ?? "Unknown title"
+  const title = firstInfoDOM?.querySelector(":scope > a")?.textContent ?? "Unknown title"
 
-  const realIconId = getLastId(
-    firstInfoDOM.querySelector<HTMLSpanElement>(":scope > span")?.getAttribute("onclick") ?? "0"
-  ) ?? 0
+  const realIconId =
+    offset > 0
+      ? iconId
+      : (getLastId(
+          firstInfoDOM?.querySelector<HTMLSpanElement>(":scope > span")?.getAttribute("onclick") ??
+            "0",
+        ) ?? 0)
 
   if (realIconId <= 0) {
     throw new Error("Unknown realIconId!")
   }
 
-
   const iconSrc = Array.from(
-    $.querySelectorAll<HTMLImageElement | HTMLVideoElement>(":scope > .select_icon_box > :is(img, video)")
-  ).map((media) => {
-    const src = media.getAttribute("src")
-    if (src == null) {
-      return null
-    }
-    return src.replace("mp4?gif", "gif")
-  }).filter((v) => v != null)
+    $.body.querySelectorAll<HTMLImageElement | HTMLVideoElement>(
+      ".select_icon_box > :is(img, video), :scope > img, :scope > video",
+    ),
+  )
+    .map((media) => {
+      const src = media.getAttribute("src")
+      if (src == null) {
+        return null
+      }
+      return src
+    })
+    .filter((v) => v != null)
 
   return {
     hasMore: json.has_more,

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Icon View regression</title>
+  <p id="result" role="status">검증 중…</p>
+  <div class="common_write_wrapper" id="comment" style="max-width: 720px">
+    <div class="common_input_wrapper"><textarea aria-label="댓글"></textarea></div>
+    <div>
+      <button onclick="app.comment_icon(this)">아이콘</button>
+      <div class="comment_icon" hidden></div>
+    </div>
+  </div>
+  <div class="common_write_wrapper" id="reply" style="max-width: 360px">
+    <div class="common_input_wrapper"><textarea aria-label="답글"></textarea></div>
+    <div>
+      <button class="comment_icon_button" onclick="app.comment_icon_toggle(this)">아이콘</button>
+      <div class="comment_icon" hidden></div>
+    </div>
+  </div>
+  <script type="module" src="./comment-icon-view.ts"></script>
+</html>
