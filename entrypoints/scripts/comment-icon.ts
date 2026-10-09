@@ -1,3 +1,5 @@
+import { ChevronLeft, ChevronRight, createElement, Star } from "lucide"
+
 import {
   loadCollection,
   loadNativePage,
@@ -7,10 +9,13 @@ import {
 } from "../lib/icon-view.ts"
 
 import "./comment-icon.css"
+import { matchesPreset } from "../lib/preset-search.ts"
+import { mobileDomain } from "../lib/ruli-constants.ts"
 
 type Mode = "all" | "favorites" | "recent"
 type Saved = { presetId: number | null; favorites: string[]; recent: string[] }
 const storageKey = "ruricon:icon-view:v1"
+const localIconLimit = 1000
 const views = new Map<HTMLElement, { toggle: () => void; destroy: () => void }>()
 let dialog: HTMLDialogElement | null = null
 let saved: Saved | null = null
@@ -28,8 +33,8 @@ function preferences(): Saved {
         : []
     saved = {
       presetId: Number.isSafeInteger(value?.presetId) && value.presetId > 0 ? value.presetId : null,
-      favorites: [...new Set(urls(value?.favorites))],
-      recent: [...new Set(urls(value?.recent))].slice(0, 100),
+      favorites: [...new Set(urls(value?.favorites))].slice(0, localIconLimit),
+      recent: [...new Set(urls(value?.recent))].slice(0, localIconLimit),
     }
   } catch {
     saved = { presetId: null, favorites: [], recent: [] }
@@ -51,6 +56,28 @@ function button(text: string, click: () => void) {
   element.textContent = text
   element.addEventListener("click", click)
   return element
+}
+
+function presetLabel(target: HTMLElement, text: string, preset: Preset | null) {
+  const label = document.createElement("span")
+  label.className = "ruricon-preset-label"
+  label.textContent = text
+  target.replaceChildren(label)
+  const thumbnail = preset?.thumbnail
+  if (!thumbnail || !/^https?:\/\//i.test(thumbnail.src) || !URL.canParse(thumbnail.src)) return
+  const media = document.createElement(thumbnail.type === "video" ? "video" : "img")
+  media.className = "ruricon-preset-thumbnail"
+  media.src = thumbnail.src
+  if (media instanceof HTMLVideoElement) {
+    media.preload = "metadata"
+    media.muted = true
+    media.playsInline = true
+    media.setAttribute("aria-hidden", "true")
+  } else {
+    media.alt = ""
+    media.loading = "lazy"
+  }
+  target.prepend(media)
 }
 
 function choosePreset(
@@ -84,9 +111,7 @@ function choosePreset(
   list.className = "ruricon-preset-list"
   const render = () => {
     list.replaceChildren()
-    for (const preset of presets.filter((preset) =>
-      preset.title.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()),
-    )) {
+    for (const preset of presets.filter((preset) => matchesPreset(preset.title, search.value))) {
       const row = button(
         `${preset.id === selected ? "✓ " : ""}${preset.title}${preset.imageCount === undefined ? "" : ` · ${preset.imageCount}개`}`,
         () => {
@@ -94,6 +119,7 @@ function choosePreset(
           choose(preset)
         },
       )
+      presetLabel(row, row.textContent ?? "", preset)
       if (preset.id === selected) row.setAttribute("aria-current", "true")
       list.append(row)
     }
@@ -103,16 +129,15 @@ function choosePreset(
         : "등록된 아이콘팩 즐겨찾기가 없습니다."
   }
   search.addEventListener("input", render)
-  modal.addEventListener(
-    "close",
-    () => {
+  modal.onclose = () => {
+    if (!modal.open) {
       search.value = ""
-      if (!modal.open) opener.focus()
-    },
-    { once: true },
-  )
+      opener.focus()
+    }
+  }
   modal.replaceChildren(heading, search, list)
   render()
+  opener.focus()
   modal.showModal()
   search.focus()
 }
@@ -151,6 +176,44 @@ export function openRuriconIconView(container: HTMLElement) {
   )
   select.className = "ruricon-preset-select"
   select.disabled = true
+  const mobile = location.hostname === mobileDomain
+  let shortcutPage = 0
+  let shortcutCapacity = 1
+  const shortcuts = document.createElement("nav")
+  shortcuts.className = "ruricon-preset-shortcuts"
+  shortcuts.setAttribute("aria-label", "프리셋 단축 선택")
+  const strip = document.createElement("div")
+  strip.className = "ruricon-preset-strip"
+  strip.dataset.mobile = String(mobile)
+  const previous = button("", () => {
+    shortcutPage--
+    renderShortcuts()
+  })
+  previous.setAttribute("aria-label", "이전 프리셋 페이지")
+  previous.append(
+    createElement(ChevronLeft, {
+      width: 20,
+      height: 20,
+      "aria-hidden": "true",
+      focusable: "false",
+    }),
+  )
+  const next = button("", () => {
+    shortcutPage++
+    renderShortcuts()
+  })
+  next.setAttribute("aria-label", "다음 프리셋 페이지")
+  next.append(
+    createElement(ChevronRight, {
+      width: 20,
+      height: 20,
+      "aria-hidden": "true",
+      focusable: "false",
+    }),
+  )
+  previous.className = next.className = "ruricon-preset-arrow"
+  if (mobile) shortcuts.append(strip)
+  else shortcuts.append(previous, strip, next)
   const tabs = document.createElement("div")
   tabs.className = "ruricon-icon-tabs"
   const tabButtons = (
@@ -181,12 +244,64 @@ export function openRuriconIconView(container: HTMLElement) {
   const grid = document.createElement("div")
   grid.className = "ruricon-icon-grid"
   grid.setAttribute("aria-label", "아이콘 목록")
-  panel.append(heading, select, tabs, pages, count, status, retry, grid)
+  panel.append(heading, select, shortcuts, tabs, pages, count, status, retry, grid)
   container.replaceChildren(panel)
   container.hidden = false
   container.style.display = "block"
 
+  function renderShortcuts() {
+    const scrollLeft = strip.scrollLeft
+    const focusedId =
+      document.activeElement instanceof HTMLButtonElement &&
+      document.activeElement.parentElement === strip
+        ? document.activeElement.dataset.presetId
+        : undefined
+    const style = getComputedStyle(strip)
+    const size = parseFloat(style.getPropertyValue("--ruricon-preset-shortcut-size"))
+    const gap = parseFloat(style.columnGap)
+    const capacity = Math.max(1, Math.floor((strip.clientWidth + gap) / (size + gap)))
+    if (capacity !== shortcutCapacity) {
+      shortcutPage = Math.floor((shortcutPage * shortcutCapacity) / capacity)
+      shortcutCapacity = capacity
+    }
+    const pageCount = Math.ceil(presets.length / shortcutCapacity)
+    shortcutPage = Math.max(0, Math.min(shortcutPage, Math.max(0, pageCount - 1)))
+    previous.disabled = shortcutPage === 0
+    next.disabled = shortcutPage >= pageCount - 1
+    shortcuts.hidden = !presets.length
+    strip.replaceChildren()
+    const visible = mobile
+      ? presets
+      : presets.slice(shortcutPage * shortcutCapacity, (shortcutPage + 1) * shortcutCapacity)
+    for (const preset of visible) {
+      const shortcut = button("", () => {
+        void selectPreset(preset)
+      })
+      shortcut.className = "ruricon-preset-shortcut"
+      shortcut.dataset.presetId = String(preset.id)
+      shortcut.title = preset.title
+      shortcut.setAttribute("aria-label", preset.title)
+      shortcut.setAttribute("aria-pressed", String(preset.id === selected?.id))
+      presetLabel(shortcut, preset.title, preset)
+      strip.append(shortcut)
+    }
+    if (mobile) strip.scrollLeft = scrollLeft
+    if (focusedId)
+      strip
+        .querySelector<HTMLButtonElement>(`[data-preset-id="${focusedId}"]`)
+        ?.focus({ preventScroll: true })
+  }
+
+  const shortcutObserver =
+    !mobile && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+          if (!disposed && !container.hidden) renderShortcuts()
+        })
+      : null
+  shortcutObserver?.observe(strip)
+
   function render() {
+    renderShortcuts()
     const focusPage = document.activeElement?.parentElement === pages
     const prefs = preferences()
     for (const { value, tab } of tabButtons) {
@@ -196,20 +311,27 @@ export function openRuriconIconView(container: HTMLElement) {
     const local = mode === "favorites" ? prefs.favorites : prefs.recent
     const total = mode === "all" ? (collection?.pages[0]?.total ?? 0) : local.length
     const pageCount =
-      mode === "all" && collection?.nativeId === null
-        ? collection.pages.length
-        : Math.ceil(total / 100)
+      mode !== "all"
+        ? 0
+        : collection?.nativeId === null
+          ? collection.pages.length
+          : Math.ceil(total / 100)
     pageIndex = Math.max(0, Math.min(pageIndex, Math.max(0, pageCount - 1)))
     const images =
       mode !== "all"
-        ? local.slice(pageIndex * 100, (pageIndex + 1) * 100)
+        ? local
         : collection?.nativeId !== null
           ? (nativePages.get(pageIndex) ?? [])
           : (collection.pages[pageIndex]?.images ?? [])
-    select.textContent = collection
-      ? `${collection.title} · ${collection.pages[0]?.total ?? 0}개 · 프리셋 변경 ▾`
-      : (selected?.title ?? "프리셋 선택 ▾")
+    presetLabel(
+      select,
+      collection
+        ? `${collection.title} · ${collection.pages[0]?.total ?? 0}개 · 프리셋 변경 ▾`
+        : (selected?.title ?? "프리셋 선택 ▾"),
+      selected,
+    )
     pages.replaceChildren()
+    pages.hidden = mode !== "all"
     for (let index = 0; index < pageCount; index++) {
       const number =
         mode === "all" && collection?.nativeId === null ? collection.pages[index].number : index + 1
@@ -242,7 +364,10 @@ export function openRuriconIconView(container: HTMLElement) {
             ).some((preview) => preview.src === image.src)
           )
             throw new Error("아이콘 미리보기를 만들지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
-          prefs.recent = [src, ...prefs.recent.filter((url) => url !== src)].slice(0, 100)
+          prefs.recent = [src, ...prefs.recent.filter((url) => url !== src)].slice(
+            0,
+            localIconLimit,
+          )
           status.textContent = "아이콘을 댓글 입력창에 전달했습니다."
           persist(status)
           if (mode === "recent") render()
@@ -264,16 +389,31 @@ export function openRuriconIconView(container: HTMLElement) {
         video.setAttribute("aria-hidden", "true")
         insert.append(video)
       }
-      const favorite = button(prefs.favorites.includes(src) ? "★" : "☆", () => {
+      const favorite = button("", () => {
+        if (!prefs.favorites.includes(src) && prefs.favorites.length >= localIconLimit) {
+          status.textContent = `즐겨찾기는 최대 ${localIconLimit}개까지 저장할 수 있습니다.`
+          return
+        }
+        const scrollTop = grid.scrollTop
         prefs.favorites = prefs.favorites.includes(src)
           ? prefs.favorites.filter((url) => url !== src)
           : [...prefs.favorites, src]
         persist(status)
         render()
+        grid.scrollTop = scrollTop
       })
       favorite.className = "ruricon-icon-star"
       favorite.setAttribute("aria-label", "즐겨찾기 추가/제거")
       favorite.setAttribute("aria-pressed", String(prefs.favorites.includes(src)))
+      favorite.append(
+        createElement(Star, {
+          width: 16,
+          height: 16,
+          fill: prefs.favorites.includes(src) ? "currentColor" : "none",
+          "aria-hidden": "true",
+          focusable: "false",
+        }),
+      )
       tile.append(insert, favorite)
       grid.append(tile)
     }
@@ -310,6 +450,7 @@ export function openRuriconIconView(container: HTMLElement) {
 
   async function selectPreset(preset: Preset) {
     selected = preset
+    shortcutPage = Math.floor(Math.max(0, presets.indexOf(preset)) / shortcutCapacity)
     mode = "all"
     pageIndex = 0
     collection = null
@@ -378,6 +519,7 @@ export function openRuriconIconView(container: HTMLElement) {
     },
     destroy: () => {
       disposed = true
+      shortcutObserver?.disconnect()
       revision++
       panel.remove()
       views.delete(container)

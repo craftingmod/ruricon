@@ -11,7 +11,11 @@ const url = `http://127.0.0.1:${port}/tests/comment-icon-view.html`
 const server = spawn(
   process.execPath,
   ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
-  { windowsHide: true, stdio: "pipe" },
+  {
+    windowsHide: true,
+    stdio: "pipe",
+    env: { ...process.env, __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: "m.ruliweb.com" },
+  },
 )
 let serverLog = ""
 server.stdout.on("data", (chunk) => {
@@ -33,38 +37,42 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   assert.ok(ready, `Vite startup failed: ${serverLog}`)
-  const browser = spawn(
-    chromeExec,
-    [
-      "--headless",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-default-browser-check",
-      `--user-data-dir=${profile}`,
-      "--virtual-time-budget=12000",
-      "--dump-dom",
-      url,
-    ],
-    { windowsHide: true, stdio: "pipe" },
-  )
-  let output = ""
-  let errors = ""
-  browser.stdout.on("data", (chunk) => {
-    output += chunk
-  })
-  browser.stderr.on("data", (chunk) => {
-    errors += chunk
-  })
-  const timer = setTimeout(() => browser.kill(), 45000)
-  const exitCode = await new Promise((resolve, reject) => {
-    browser.on("exit", resolve)
-    browser.on("error", reject)
-  })
-  clearTimeout(timer)
-  assert.equal(exitCode, 0, errors)
-  const result = output.match(/<p id="result"[^>]*>[\s\S]*?<\/p>/)?.[0] ?? output.slice(0, 2000)
-  assert.ok(result.includes('data-result="PASS"'), result)
-  console.log(result.replace(/<[^>]+>/g, ""))
+  for (const testUrl of [url, url.replace("127.0.0.1", "m.ruliweb.com")]) {
+    const browser = spawn(
+      chromeExec,
+      [
+        "--headless",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-proxy-server",
+        "--host-resolver-rules=MAP m.ruliweb.com 127.0.0.1",
+        `--user-data-dir=${profile}`,
+        "--virtual-time-budget=12000",
+        "--dump-dom",
+        testUrl,
+      ],
+      { windowsHide: true, stdio: "pipe" },
+    )
+    let output = ""
+    let errors = ""
+    browser.stdout.on("data", (chunk) => {
+      output += chunk
+    })
+    browser.stderr.on("data", (chunk) => {
+      errors += chunk
+    })
+    const timer = setTimeout(() => browser.kill(), 45000)
+    const exitCode = await new Promise((resolve, reject) => {
+      browser.on("exit", resolve)
+      browser.on("error", reject)
+    })
+    clearTimeout(timer)
+    assert.equal(exitCode, 0, errors)
+    const result = output.match(/<p id="result"[^>]*>[\s\S]*?<\/p>/)?.[0] ?? output.slice(0, 2000)
+    assert.ok(result.includes('data-result="PASS"'), result)
+    console.log(`${new URL(testUrl).hostname}: ${result.replace(/<[^>]+>/g, "")}`)
+  }
 } finally {
   server.kill()
   const withinTemp = relative(tempRoot, resolve(profile))

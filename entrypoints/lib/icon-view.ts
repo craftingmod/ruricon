@@ -2,7 +2,13 @@ import { readMain } from "./editor/articleMeta.ts"
 import { iconBoardId, mobileDomain } from "./ruli-constants.ts"
 import { readArticle, readIconFavorite, readIconImages } from "./ruli-utils.ts"
 
-export type Preset = { id: number; title: string; mainId: number | null; imageCount?: number }
+export type Preset = {
+  id: number
+  title: string
+  mainId: number | null
+  imageCount?: number
+  thumbnail: { type: "image" | "video"; src: string }
+}
 export type IconPage = {
   number: number
   images: string[]
@@ -34,7 +40,7 @@ export function loadPresets() {
       if (mainId !== null && (!Number.isSafeInteger(mainId) || mainId < 1)) continue
       const id = mainId ?? favorite.iconId
       if (!presets.has(id) || match?.[1] === "M") {
-        presets.set(id, { id, title: favorite.iconTitle, mainId })
+        presets.set(id, { id, title: favorite.iconTitle, mainId, thumbnail: favorite.thumbnail })
       }
     }
     return [...presets.values()]

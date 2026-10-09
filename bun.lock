@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "wxt-starter",
+      "dependencies": {
+        "lucide": "^1.54.0",
+      },
       "devDependencies": {
         "@types/jquery": "^4.0.1",
         "oxfmt": "^0.72.0",
@@ -660,6 +663,8 @@
     "lodash.merge": ["lodash.merge@4.6.2", "", {}, "sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ=="],
 
     "lodash.once": ["lodash.once@4.1.1", "", {}, "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg=="],
+
+    "lucide": ["lucide@1.54.0", "", {}, "sha512-2N2brA+7NYLDlxG2QNcmGej5Qhw3pYMPN9MLktTNkQfs7Sk/2g2e8s0CUWibLz5lPVKMYesxm+k/ndDB7E1JjQ=="],
 
     "magic-string": ["magic-string@1.4.3", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.6.0" } }, "sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ=="],
 

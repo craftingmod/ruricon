@@ -37,6 +37,9 @@
   border-color: #467ac8;
 }
 .ruricon-preset-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   margin: 8px 0;
   padding: 8px 12px;
@@ -50,6 +53,63 @@
 }
 .ruricon-icon-tabs button {
   flex: 1;
+}
+.ruricon-preset-shortcuts {
+  --ruricon-preset-shortcut-size: 80px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.ruricon-preset-shortcuts[hidden],
+.ruricon-icon-pages[hidden] {
+  display: none;
+}
+.ruricon-preset-strip {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  overflow: hidden;
+  padding: 3px 0;
+  justify-content: center;
+}
+.ruricon-preset-strip[data-mobile="true"] {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.ruricon-icon-view .ruricon-preset-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--ruricon-preset-shortcut-size);
+  width: var(--ruricon-preset-shortcut-size);
+  height: var(--ruricon-preset-shortcut-size);
+  padding: 0;
+  overflow: hidden;
+}
+.ruricon-preset-shortcut .ruricon-preset-thumbnail {
+  display: block;
+  flex: 0 0 var(--ruricon-preset-shortcut-size);
+  width: var(--ruricon-preset-shortcut-size);
+  height: var(--ruricon-preset-shortcut-size);
+  object-fit: contain;
+  margin: 0;
+}
+.ruricon-preset-shortcut .ruricon-preset-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.ruricon-icon-view .ruricon-preset-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  padding: 0;
+  border: 0;
 }
 .ruricon-icon-pages {
   display: flex;
@@ -69,12 +129,13 @@
 }
 .ruricon-icon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  grid-template-columns: repeat(auto-fill, 100px);
   gap: 5px;
   max-height: min(50dvh, 480px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 3px;
+  justify-content: center;
 }
 .ruricon-icon-tile {
   position: relative;
@@ -96,10 +157,26 @@
   margin: 0;
 }
 .ruricon-icon-view .ruricon-icon-star {
-  width: 100%;
-  min-height: 24px;
-  font-size: 12px;
-  margin-top: 2px;
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid #0003;
+  border-radius: 50%;
+  background: #fff;
+  color: #333;
+  box-shadow: 0 1px 3px #0003;
+}
+.ruricon-icon-view .ruricon-icon-star[aria-pressed="false"] {
+  backdrop-filter: blur(2px);
+  background: #ffffff60;
+}
+.ruricon-icon-star svg {
+  display: block;
+  margin: auto;
 }
 .ruricon-preset-dialog {
   box-sizing: border-box;
@@ -128,12 +205,26 @@
   overflow-y: auto;
 }
 .ruricon-preset-list button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   min-height: 56px;
   padding: 10px;
   text-align: left;
   margin-bottom: 6px;
+}
+.ruricon-preset-select .ruricon-preset-thumbnail,
+.ruricon-preset-list .ruricon-preset-thumbnail {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  object-fit: contain;
+  margin: 0;
+}
+.ruricon-preset-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 480px) {
   .ruricon-icon-view {
