@@ -104,16 +104,26 @@ export function loadCollection(preset: Preset): Promise<IconCollection> {
     if (!state || state.mainArticleId !== preset.mainId) {
       throw new Error("대표 게시글의 묶음 metadata를 확인해주세요.")
     }
-    const slaves = [...state.slaves].sort((a, b) => a.page - b.page)
-    const total = slaves.reduce((sum, slave) => sum + slave.images.length, 0)
+    const pages = [...state.slaves]
+      .filter((slave) => slave.articleId !== null)
+      .sort((a, b) => a.page - b.page)
+      .map((slave) => ({
+        number: slave.page,
+        images: [
+          ...new Set(
+            slave.images.map((src) => {
+              const url = new URL(src)
+              url.searchParams.set("icon", String(slave.articleId))
+              return url.href
+            }),
+          ),
+        ],
+        nextOffset: null,
+      }))
+    const total = pages.reduce((sum, page) => sum + page.images.length, 0)
     return {
       title: state.name,
-      pages: slaves.map((slave) => ({
-        number: slave.page,
-        images: slave.images,
-        nextOffset: null,
-        total,
-      })),
+      pages: pages.map((page) => ({ ...page, total })),
       nativeId: null,
     }
   })

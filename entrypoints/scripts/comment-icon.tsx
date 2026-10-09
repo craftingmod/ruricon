@@ -579,6 +579,15 @@ function IconView({
     if (next === "all" && selected && !collection) void selectPreset(selected)
   }
 
+  function preserveReorderFocus() {
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && grid.current?.contains(focused)) {
+      // Moving a focused icon makes the browser scroll it into view.
+      reorderedFocus.current = focused
+      focused.blur()
+    }
+  }
+
   function setFavorite(src: string, favorite: boolean) {
     if (favorite && !saved.favorites.includes(src) && saved.favorites.length >= localIconLimit) {
       setLoading((current) => ({
@@ -587,6 +596,7 @@ function IconView({
       }))
       return
     }
+    preserveReorderFocus()
     updateSaved((current) => {
       if (current.favorites.includes(src) === favorite) return current
       if (favorite && current.favorites.length >= localIconLimit) return current
@@ -612,12 +622,7 @@ function IconView({
         ).some((preview) => preview.src === image.src)
       )
         throw new Error("아이콘 미리보기를 만들지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
-      const focused = document.activeElement
-      if (focused instanceof HTMLElement && grid.current?.contains(focused)) {
-        // Moving a focused icon makes the browser scroll it into view.
-        reorderedFocus.current = focused
-        focused.blur()
-      }
+      preserveReorderFocus()
       updateSaved((current) => ({
         ...current,
         recent: [src, ...current.recent.filter((url) => url !== src)].slice(0, localIconLimit),

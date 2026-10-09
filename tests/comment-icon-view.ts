@@ -102,14 +102,36 @@ window.fetch = async (input, options) => {
           name: id === 900 ? "냥냥" : "분할만",
           boardId: 98,
           mainArticleId: id,
-          slaves: [
-            { page: 3, articleId: id + 2, images: [source(id + 2, 0)] },
-            {
-              page: 1,
-              articleId: id + 1,
-              images: Array.from({ length: 96 }, (_, index) => source(id + 1, index)),
-            },
-          ],
+          slaves:
+            id === 980
+              ? [
+                  {
+                    page: 3,
+                    articleId: 982,
+                    images: [
+                      "https://example.com/shared.png",
+                      "https://example.com/shared.png?icon=123",
+                    ],
+                  },
+                  { page: 2, articleId: null, images: [source(980, 0)] },
+                  {
+                    page: 1,
+                    articleId: 981,
+                    images: [
+                      "https://example.com/shared.png?icon=123",
+                      "https://example.com/shared.png?icon=456&icon=789",
+                      "https://example.com/other.png?size=large&icon=123#preview",
+                    ],
+                  },
+                ]
+              : [
+                  { page: 3, articleId: id + 2, images: [source(id + 2, 0)] },
+                  {
+                    page: 1,
+                    articleId: id + 1,
+                    images: Array.from({ length: 96 }, (_, index) => source(id + 1, index)),
+                  },
+                ],
         })
   return new Response(
     `<div class="board_main"><div class="board_main_view"><div class="view_content"><article><div>${content}</div></article></div></div></div>`,
@@ -602,6 +624,20 @@ async function check() {
   const before = requests.length
   await Promise.all([loadCollection(presets[0]), loadCollection(presets[0])])
   assert(requests.length === before, "Shared cached requests")
+  const slaveCollection = await loadCollection({
+    id: 980,
+    mainId: 980,
+    title: "Slave URL test",
+    thumbnail: { type: "image", src: source(980, 0) },
+  })
+  assert(
+    slaveCollection.pages.map((page) => page.number).join(",") === "1,3" &&
+      slaveCollection.pages[0].images.join(",") ===
+        "https://example.com/shared.png?icon=981,https://example.com/other.png?size=large&icon=981#preview" &&
+      slaveCollection.pages[1].images.join(",") === "https://example.com/shared.png?icon=982" &&
+      slaveCollection.pages.every((page) => page.total === 3 && page.nextOffset === null),
+    "Slave URLs use their article ID, deduplicate per page, preserve other URL parts and count published icons",
+  )
   const beforeNewPage = requests.length
   await Promise.all([loadNativePage(960, 0), loadNativePage(960, 0)])
   assert(requests.length === beforeNewPage + 1, "Concurrent requests share one fetch")
@@ -975,6 +1011,7 @@ async function check() {
   const cleanupScroll = mountRecent()
   click("button[onclick]", comment)
   await tick()
+  enableEditMode(comment)
   const insertGrid = comment.querySelector<HTMLElement>(".ruricon-icon-grid")!
   const lowerImage = insertGrid.querySelectorAll<HTMLImageElement>("img")[40]
   const lowerTile = lowerImage.closest<HTMLElement>(".ruricon-icon-tile")!
@@ -1003,6 +1040,37 @@ async function check() {
     insertGrid.scrollTop === insertScrollTop,
     "Selecting the current tab does not reset scroll",
   )
+  const lowerFavoriteTile = insertGrid.querySelectorAll<HTMLElement>(".ruricon-icon-tile")[70]
+  const lowerFavoriteImage = lowerFavoriteTile.querySelector("img")!
+  const lowerFavoriteButton =
+    lowerFavoriteTile.querySelector<HTMLButtonElement>(".ruricon-icon-star")!
+  lowerFavoriteButton.focus()
+  const favoriteReorderScroll = insertGrid.scrollTop
+  assert(
+    favoriteReorderScroll > 0,
+    "Favorite reorder starts with a focused star in a scrolled grid",
+  )
+  for (const pressed of ["true", "false"]) {
+    click(".ruricon-icon-star", lowerFavoriteTile)
+    await tick()
+    assert(
+      lowerFavoriteButton.getAttribute("aria-pressed") === pressed,
+      "Favorite addition and removal update the same button",
+    )
+    if (pressed === "true")
+      assert(
+        insertGrid.querySelector("img") === lowerFavoriteImage,
+        "Favorite addition moves the icon first",
+      )
+    assert(
+      insertGrid.scrollTop === favoriteReorderScroll,
+      "Favorite reordering preserves scroll without resetting to top",
+    )
+    assert(
+      document.activeElement === lowerFavoriteButton,
+      "Favorite reordering preserves keyboard focus",
+    )
+  }
   click(".ruricon-icon-tabs button:nth-child(3)", comment)
   assert(insertGrid.scrollTop === 0, "Changing tabs resets scroll")
   click(".ruricon-icon-tabs button:first-child", comment)
