@@ -1,12 +1,16 @@
 .ruricon-icon-view {
+  --ruricon-icon-size: 100px;
   container-type: inline-size;
   box-sizing: border-box;
-  padding: 12px;
+  padding: 0 12px 12px;
   border: 1px solid #aaa6;
   border-radius: 10px;
   background: Canvas;
   color: CanvasText;
   font: 14px/1.5 sans-serif;
+}
+.ruricon-icon-view[data-mobile="true"] {
+  --ruricon-icon-size: 70px;
 }
 .ruricon-icon-view button,
 .ruricon-preset-dialog button,
@@ -54,9 +58,14 @@
 }
 .ruricon-icon-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
   margin: 10px 0;
+}
+.ruricon-icon-tabs {
+  flex-shrink: 0;
 }
 .ruricon-icon-view .ruricon-icon-tabs button {
   flex: 1;
@@ -99,7 +108,7 @@
   min-height: 36px;
 }
 .ruricon-preset-shortcuts {
-  --ruricon-preset-shortcut-size: 80px;
+  --ruricon-preset-shortcut-size: calc(var(--ruricon-icon-size) * 0.8);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -157,11 +166,13 @@
 }
 .ruricon-icon-pages {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
+  max-width: 100%;
   gap: 5px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
   padding: 3px;
+  border-radius: 10px;
+  background: rgba(130, 130, 130, 0.033);
 }
 .ruricon-icon-view .ruricon-icon-pages button {
   flex: 0 0 32px;
@@ -175,30 +186,31 @@
   background: #8882;
   border-color: transparent;
 }
-@container (min-width: 600px) {
-  .ruricon-icon-toolbar[data-mobile="false"] {
-    flex-direction: row;
-    align-items: center;
-    gap: 24px;
-  }
-  .ruricon-icon-toolbar[data-mobile="false"] .ruricon-icon-tabs {
-    flex-shrink: 0;
-  }
-  .ruricon-icon-toolbar[data-mobile="false"] .ruricon-icon-pages {
-    margin-left: auto;
-  }
-}
 .ruricon-icon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 100px);
+  grid-template-columns:
+    repeat(auto-fill, minmax(var(--ruricon-icon-size), 1fr));
+
   gap: 5px;
   max-height: min(50dvh, 480px);
+
   overflow-y: auto;
   overflow-anchor: none;
-  overscroll-behavior: contain;
+
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+
   padding: 3px;
-  justify-content: center;
+  justify-content: start;
 }
+
+/* 터치 환경 */
+@media (pointer: coarse) {
+  .ruricon-icon-grid {
+    scrollbar-gutter: auto;
+  }
+}
+
 .ruricon-icon-tile {
   position: relative;
   min-width: 0;
@@ -232,13 +244,22 @@
   object-fit: contain;
   margin: 0;
 }
-.ruricon-icon-view .ruricon-icon-star {
+.ruricon-icon-view .ruricon-icon-star,
+.ruricon-icon-view .ruricon-icon-move-first {
   position: absolute;
-  bottom: 3px;
-  right: 3px;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  bottom: 5%;
+  right: 5%;
+  /*
+  bottom: 5px;
+  right: 5px;
+  width: calc(var(--ruricon-icon-size) / 4);
+  height: calc(var(--ruricon-icon-size) / 4);
+  min-height: calc(var(--ruricon-icon-size) / 4);
+  */
+  width: 25%;
+  height: 25%;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0;
   border: 1px solid #0003;
   border-radius: 50%;
@@ -250,7 +271,12 @@
   backdrop-filter: blur(2px);
   background: #ffffff60;
 }
-.ruricon-icon-star svg {
+.ruricon-icon-view .ruricon-icon-move-first {
+  left: 5%;
+  right: auto;
+}
+.ruricon-icon-star svg,
+.ruricon-icon-move-first svg {
   display: block;
   margin: auto;
 }

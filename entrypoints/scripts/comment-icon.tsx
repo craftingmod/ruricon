@@ -1,4 +1,14 @@
-import { Check, ChevronLeft, ChevronRight, type IconNode, SquareOff, Star, Trash2, X } from "lucide"
+import {
+  ArrowUpToLine,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  SquareOff,
+  Star,
+  StarIcon,
+  Trash2,
+  X,
+} from "lucide-preact"
 import { createPortal, createRef, h, render as renderView, type Ref } from "preact"
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "preact/hooks"
 
@@ -120,25 +130,6 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   )
 }
 
-function Icon({ node, size, filled = false }: { node: IconNode; size: number; filled?: boolean }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {node.map(([tag, attrs], index) => h(tag, { ...attrs, key: index }))}
-    </svg>
-  )
-}
-
 function PresetLabel({ text, preset }: { text: string; preset: Preset | null }) {
   const thumbnail = preset?.thumbnail
   const valid = thumbnail && /^https?:\/\//i.test(thumbnail.src) && URL.canParse(thumbnail.src)
@@ -193,7 +184,7 @@ function PresetDialog({ request, dismiss }: { request: DialogState; dismiss: () 
       <div class="ruricon-preset-heading">
         <strong id="ruricon-preset-title">프리셋 선택</strong>
         <button type="button" onClick={dismiss}>
-          닫기
+          <X size={18} />
         </button>
       </div>
       <input
@@ -217,7 +208,7 @@ function PresetDialog({ request, dismiss }: { request: DialogState; dismiss: () 
           >
             <PresetLabel
               preset={preset}
-              text={`${preset.id === request.selected ? "✓ " : ""}${preset.title}${preset.imageCount === undefined ? "" : ` · ${preset.imageCount}개`}`}
+              text={`${preset.id === request.selected ? "✓ " : ""}${preset.title}${preset.imageCount === undefined ? "" : ` - ${preset.imageCount}개`}`}
             />
           </button>
         ))}
@@ -253,7 +244,7 @@ function PresetShortcuts({
   function capacity() {
     const element = strip.current!
     const style = getComputedStyle(element)
-    const size = parseFloat(style.getPropertyValue("--ruricon-preset-shortcut-size"))
+    const size = element.firstElementChild?.getBoundingClientRect().width ?? 0
     const gap = parseFloat(style.columnGap)
     return Math.max(1, Math.floor((element.clientWidth + gap) / (size + gap)))
   }
@@ -313,7 +304,7 @@ function PresetShortcuts({
           disabled={page === 0}
           onClick={() => move(-1)}
         >
-          <Icon node={ChevronLeft} size={20} />
+          <ChevronLeft size={20} aria-hidden="true" focusable="false" />
         </button>
       )}
       <div ref={strip} class="ruricon-preset-strip" data-mobile={String(mobile)}>
@@ -340,7 +331,7 @@ function PresetShortcuts({
           disabled={page >= pageCount - 1}
           onClick={() => move(1)}
         >
-          <Icon node={ChevronRight} size={20} />
+          <ChevronRight size={20} aria-hidden="true" focusable="false" />
         </button>
       )}
     </nav>
@@ -354,6 +345,7 @@ function IconTile({
   recent,
   insert,
   setFavorite,
+  moveFavoriteToFront,
 }: {
   src: string
   index: number
@@ -361,6 +353,7 @@ function IconTile({
   recent: boolean
   insert: (image: HTMLImageElement, src: string) => Promise<void>
   setFavorite: (src: string, favorite: boolean) => void
+  moveFavoriteToFront?: (src: string) => void
 }) {
   const image = useRef<HTMLImageElement>(null)
   return (
@@ -391,8 +384,25 @@ function IconTile({
         aria-pressed={favorite}
         onClick={() => setFavorite(src, !favorite)}
       >
-        <Icon node={Star} size={16} filled={favorite} />
+        <Star
+          size={16}
+          fill={favorite ? "currentColor" : "none"}
+          aria-hidden="true"
+          focusable="false"
+        />
       </button>
+      {moveFavoriteToFront && (
+        <button
+          type="button"
+          class="ruricon-icon-move-first"
+          aria-label="즐겨찾기 맨 앞으로 이동"
+          title="즐겨찾기 맨 앞으로 이동"
+          disabled={index === 0}
+          onClick={() => moveFavoriteToFront(src)}
+        >
+          <ArrowUpToLine size={16} aria-hidden="true" focusable="false" />
+        </button>
+      )}
     </div>
   )
 }
@@ -482,7 +492,15 @@ function IconView({
     if (reorderedFocus.current) {
       const focused = reorderedFocus.current
       reorderedFocus.current = null
-      if (focused.isConnected) focused.focus({ preventScroll: true })
+      if (focused.isConnected) {
+        const target =
+          focused instanceof HTMLButtonElement && focused.disabled
+            ? focused
+                .closest(".ruricon-icon-tile")
+                ?.querySelector<HTMLButtonElement>(".ruricon-icon-insert")
+            : focused
+        target?.focus({ preventScroll: true })
+      }
     }
     if (document.activeElement?.parentElement === pages.current)
       pages.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus()
@@ -603,10 +621,23 @@ function IconView({
       return {
         ...current,
         favorites: favorite
-          ? [...current.favorites, src]
+          ? [src, ...current.favorites]
           : current.favorites.filter((url) => url !== src),
       }
     })
+  }
+
+  function moveFavoriteToFront(src: string) {
+    if (saved.favorites.indexOf(src) <= 0) return
+    preserveReorderFocus()
+    updateSaved((current) =>
+      current.favorites.indexOf(src) <= 0
+        ? current
+        : {
+            ...current,
+            favorites: [src, ...current.favorites.filter((url) => url !== src)],
+          },
+    )
   }
 
   async function insertIcon(image: HTMLImageElement, src: string) {
@@ -640,11 +671,11 @@ function IconView({
   return createPortal(
     <section
       class="ruricon-icon-view"
+      data-mobile={String(location.hostname === mobileDomain)}
       data-edit-mode={String(editMode)}
       aria-label="아이콘 선택"
       aria-busy={loading.busy}
     >
-      <strong>아이콘 선택</strong>
       <button
         ref={select}
         type="button"
@@ -667,8 +698,8 @@ function IconView({
             !ready
               ? "프리셋 불러오는 중…"
               : collection
-                ? `${collection.title} · ${collection.pages[0]?.total ?? 0}개 · 프리셋 변경 ▾`
-                : (selected?.title ?? "프리셋 선택 ▾")
+                ? `${collection.title} - ${collection.pages[0]?.total ?? 0}개`
+                : (selected?.title ?? "프리셋 선택")
           }
         />
       </button>
@@ -680,7 +711,7 @@ function IconView({
           void selectPreset(preset)
         }}
       />
-      <div class="ruricon-icon-toolbar" data-mobile={String(location.hostname === mobileDomain)}>
+      <div class="ruricon-icon-toolbar">
         <div class="ruricon-icon-tabs">
           {(
             [
@@ -708,7 +739,7 @@ function IconView({
             title="최근 사용 기록 삭제"
             onClick={() => updateSaved((current) => ({ ...current, recent: [] }))}
           >
-            <Icon node={Trash2} size={16} />
+            <Trash2 size={16} aria-hidden="true" focusable="false" />
           </button>
         </div>
         <nav
@@ -741,7 +772,12 @@ function IconView({
           aria-pressed={editMode}
           onClick={() => updateSaved((current) => ({ ...current, editMode: !current.editMode }))}
         >
-          <Icon node={Star} size={16} filled={editMode} />
+          <Star
+            size={16}
+            fill={editMode ? "currentColor" : "none"}
+            aria-hidden="true"
+            focusable="false"
+          />
           편집 모드
         </button>
         <button
@@ -754,7 +790,11 @@ function IconView({
             updateSaved((current) => ({ ...current, prioritizeRecent: !current.prioritizeRecent }))
           }
         >
-          <Icon node={saved.prioritizeRecent ? Check : X} size={16} />
+          {saved.prioritizeRecent ? (
+            <Check size={16} aria-hidden="true" focusable="false" />
+          ) : (
+            <X size={16} aria-hidden="true" focusable="false" />
+          )}
           우선 정렬
         </button>
       </div>
@@ -778,11 +818,12 @@ function IconView({
             recent={mode === "all" && recent.has(src)}
             insert={insertIcon}
             setFavorite={setFavorite}
+            moveFavoriteToFront={mode === "favorites" && editMode ? moveFavoriteToFront : undefined}
           />
         ))}
         {!images.length && !loading.busy && (
           <div class="ruricon-icon-empty" role="img" aria-label="표시할 아이콘이 없습니다.">
-            <Icon node={SquareOff} size={32} />
+            <SquareOff size={32} aria-hidden="true" focusable="false" />
           </div>
         )}
       </div>

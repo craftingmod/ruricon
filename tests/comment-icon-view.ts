@@ -9,6 +9,7 @@ function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
 }
 const requests: string[] = []
+const iconSize = location.hostname === "m.ruliweb.com" ? 70 : 100
 const source = (id: number, index: number) =>
   `https://example.com/${id}/${index}.${id === 5033 && index === 1 ? "mp4" : "png"}?icon=${id}`
 const nativeSource = (id: number, index: number) => source(id, index).split("?")[0]
@@ -200,8 +201,8 @@ async function check() {
   )
   assert(
     comment.querySelector<HTMLElement>(".ruricon-icon-insert")!.getBoundingClientRect().width ===
-      100,
-    "Grid icon size is 100px",
+      iconSize,
+    "Grid icon size follows the site domain",
   )
   const numbers = [...comment.querySelectorAll(".ruricon-icon-pages button")].map(
     (button) => button.textContent,
@@ -222,9 +223,9 @@ async function check() {
     "Page buttons are compact circles",
   )
   assert(
-    getComputedStyle(toolbar).flexDirection ===
-      (location.hostname === "m.ruliweb.com" ? "column" : "row"),
-    "Wide desktop uses one row; mobile keeps separate rows",
+    tabs.getBoundingClientRect().top < iconPages.getBoundingClientRect().bottom &&
+      iconPages.getBoundingClientRect().top < tabs.getBoundingClientRect().bottom,
+    "Short page list shares one row with tabs on desktop and mobile",
   )
   const extraPages = Array.from({ length: 18 }, (_, index) => {
     const button = pageButton.cloneNode(true) as HTMLButtonElement
@@ -233,22 +234,44 @@ async function check() {
     iconPages.append(button)
     return button
   })
-  assert(iconPages.scrollWidth > iconPages.clientWidth, "Twenty pages scroll horizontally")
+  for (const width of [720, 651, 360]) {
+    ;(comment as HTMLElement).style.maxWidth = `${width}px`
+    assert(
+      iconPages.getBoundingClientRect().top >= tabs.getBoundingClientRect().bottom &&
+        Math.abs(iconPages.getBoundingClientRect().left - toolbar.getBoundingClientRect().left) < 1,
+      `Twenty pages move below tabs and align left at ${width}px`,
+    )
+    assert(
+      toolbar.scrollWidth <= toolbar.clientWidth &&
+        iconPages.scrollWidth <= iconPages.clientWidth &&
+        tabs.scrollWidth <= tabs.clientWidth &&
+        pageButton.offsetWidth === 32,
+      `Many pages wrap without horizontal scrolling or shrinking buttons at ${width}px`,
+    )
+    assert(
+      extraPages.at(-1)!.getBoundingClientRect().top > pageButton.getBoundingClientRect().top &&
+        extraPages.at(-1)!.getBoundingClientRect().right <= iconPages.getBoundingClientRect().right,
+      `Last page stays visible on a wrapped line at ${width}px`,
+    )
+  }
+  for (const button of extraPages.slice(8)) button.remove()
+  ;(comment as HTMLElement).style.maxWidth = "651px"
   assert(
-    toolbar.scrollWidth <= toolbar.clientWidth &&
-      tabs.scrollWidth <= tabs.clientWidth &&
-      pageButton.offsetWidth === 32,
-    "Many pages preserve tabs and button size without overflowing the toolbar",
+    iconPages.getBoundingClientRect().top >= tabs.getBoundingClientRect().bottom &&
+      extraPages[7].getBoundingClientRect().top === pageButton.getBoundingClientRect().top,
+    "Ten pages move together to the next row at 651px",
   )
-  iconPages.scrollLeft = iconPages.scrollWidth
+  ;(comment as HTMLElement).style.maxWidth = "720px"
   assert(
-    extraPages.at(-1)!.getBoundingClientRect().right <= iconPages.getBoundingClientRect().right,
-    "Last page is reachable by scrolling",
+    iconPages.getBoundingClientRect().top < tabs.getBoundingClientRect().bottom,
+    "Ten pages return to the same row when space is available",
   )
   for (const button of extraPages) button.remove()
-  iconPages.scrollLeft = 0
   ;(comment as HTMLElement).style.maxWidth = "360px"
-  assert(getComputedStyle(toolbar).flexDirection === "column", "Narrow desktop uses two rows")
+  assert(
+    iconPages.getBoundingClientRect().top >= tabs.getBoundingClientRect().bottom,
+    "Narrow picker uses two rows for short page lists too",
+  )
   ;(comment as HTMLElement).style.maxWidth = "720px"
   assert(
     comment
@@ -401,8 +424,15 @@ async function check() {
       "Favorite icon has an amber border",
     )
     assert(
-      insertButton.offsetWidth === 100 && insertButton.offsetHeight === 100,
+      insertButton.offsetWidth === iconSize && insertButton.offsetHeight === iconSize,
       "Favorite border preserves tile size",
+    )
+    const starSize = favoriteTile
+      .querySelector<HTMLElement>(".ruricon-icon-star")!
+      .getBoundingClientRect()
+    assert(
+      starSize.width === iconSize / 4 && starSize.height === iconSize / 4,
+      "Favorite button is one quarter of the icon size",
     )
   }
   click(".ruricon-icon-pages button:nth-child(2)", comment)
@@ -530,12 +560,13 @@ async function check() {
   const shortcut = strip.querySelector<HTMLElement>(".ruricon-preset-shortcut")!
   const thumbnail = shortcut.querySelector<HTMLElement>(".ruricon-preset-thumbnail")!
   assert(
-    shortcut.getBoundingClientRect().width === 80 && shortcut.getBoundingClientRect().height === 80,
-    "Shortcut button uses shared 80px size",
+    shortcut.getBoundingClientRect().width === iconSize * 0.8 &&
+      shortcut.getBoundingClientRect().height === iconSize * 0.8,
+    "Shortcut button uses 80 percent of the icon size",
   )
   assert(
-    thumbnail.getBoundingClientRect().width === 80 &&
-      thumbnail.getBoundingClientRect().height === 80,
+    thumbnail.getBoundingClientRect().width === iconSize * 0.8 &&
+      thumbnail.getBoundingClientRect().height === iconSize * 0.8,
     "Thumbnail matches shortcut button size",
   )
   assert(
@@ -1078,7 +1109,74 @@ async function check() {
   assert(insertGrid.scrollTop > 0, "Page change starts from a scrolled grid")
   click(".ruricon-icon-pages button:nth-child(2)", comment)
   assert(insertGrid.scrollTop === 0, "Changing pages resets scroll")
+  await tick()
+  const orderTiles = [...insertGrid.querySelectorAll<HTMLElement>(".ruricon-icon-tile")].slice(0, 2)
+  const orderSources = orderTiles.map((tile) => tile.querySelector<HTMLImageElement>("img")!.src)
+  assert(orderTiles.length === 2, "Favorite order regression starts with two loaded icons")
+  for (const tile of orderTiles) click(".ruricon-icon-star", tile)
+  const beforeMove = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    beforeMove.favorites.join(",") === [...orderSources].reverse().join(","),
+    "New favorites are inserted at the beginning",
+  )
+  assert(
+    !insertGrid.querySelector(".ruricon-icon-move-first"),
+    "All tab does not show reorder controls",
+  )
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  const moveButtons = insertGrid.querySelectorAll<HTMLButtonElement>(".ruricon-icon-move-first")
+  assert(
+    moveButtons.length === 2 && moveButtons[0].disabled && !moveButtons[1].disabled,
+    "Edit mode shows reorder controls only for Favorites; first is disabled",
+  )
+  assert(
+    getComputedStyle(moveButtons[1]).position === "absolute" &&
+      moveButtons[1].getBoundingClientRect().left <
+        moveButtons[1].closest(".ruricon-icon-tile")!.getBoundingClientRect().left + 10,
+    "Move-to-front button overlays the bottom left",
+  )
+  moveButtons[1].focus()
+  click(".ruricon-icon-move-first", moveButtons[1].closest(".ruricon-icon-tile")!)
+  const afterMove = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    afterMove.favorites.join(",") === orderSources.join(",") &&
+      JSON.stringify({ ...afterMove, favorites: beforeMove.favorites }) ===
+        JSON.stringify(beforeMove),
+    "Move-to-front persists order without duplicates or changing other preferences",
+  )
+  assert(
+    insertGrid.querySelector<HTMLImageElement>("img")!.src === orderSources[0] &&
+      moveButtons[1].disabled,
+    "Moved icon becomes index zero",
+  )
+  assert(
+    document.activeElement ===
+      moveButtons[1].closest(".ruricon-icon-tile")!.querySelector(".ruricon-icon-insert"),
+    "Disabled reorder control transfers focus to its icon without scrolling",
+  )
   void act(cleanupScroll)
+  const cleanupOrderReload = mountRecent()
+  click("button[onclick]", comment)
+  await tick()
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  const orderGrid = comment.querySelector<HTMLElement>(".ruricon-icon-grid")!
+  assert(
+    [...orderGrid.querySelectorAll<HTMLImageElement>("img")].map((image) => image.src).join(",") ===
+      orderSources.join(","),
+    "Reload restores favorite order",
+  )
+  click(".ruricon-icon-edit-mode", comment)
+  assert(
+    !orderGrid.querySelector(".ruricon-icon-move-first"),
+    "Edit mode off hides reorder buttons",
+  )
+  click(".ruricon-icon-edit-mode", comment)
+  click(".ruricon-icon-tabs button:nth-child(3)", comment)
+  assert(
+    !orderGrid.querySelector(".ruricon-icon-move-first"),
+    "Recent tab does not show reorder buttons",
+  )
+  void act(cleanupOrderReload)
   result.textContent =
     "PASS: API parsing, segment/native pages, URL preservation, favorites/recent, retry, races, comment/reply ownership and cleanup"
   result.dataset.result = "PASS"
