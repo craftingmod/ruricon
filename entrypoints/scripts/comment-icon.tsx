@@ -50,13 +50,15 @@ type Saved = {
   prioritizeRecent: boolean
 }
 type UpdateSaved = (update: (current: Saved) => Saved) => void
-type AppHandle = { open: (container: HTMLElement) => void }
+type AppHandle = {
+  open: (container: HTMLElement, host: HTMLElement, toggle: boolean, mode?: Mode) => void
+}
 const storageKey = "ruricon:icon-view:v1"
 const presetFavoritesKey = "ruricon:preset-favorites:v1"
 const hiddenAdPresetsKey = "ruricon:hidden-ad-presets:v1"
 const localIconLimit = 1000
 const appRef = createRef<AppHandle>()
-const ownedContainers = new Set<HTMLElement>()
+const ownedContainers = new Map<HTMLElement, HTMLElement>()
 let appRoot: HTMLElement | null = null
 
 function readPreferences(): Saved {
@@ -113,7 +115,14 @@ function readHiddenAdPresets(): number[] {
 }
 
 function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
-  const [views, setViews] = useState<{ container: HTMLElement; visible: boolean }[]>([])
+  const [views, setViews] = useState<
+    {
+      container: HTMLElement
+      host: HTMLElement
+      visible: boolean
+      requestedMode?: { mode: Mode }
+    }[]
+  >([])
   const [saved, setSaved] = useState(readPreferences)
   const [presetFavorites, setPresetFavorites] = useState(readPresetFavorites)
   const [storageError, setStorageError] = useState<string | null>(null)
@@ -128,13 +137,16 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   useImperativeHandle(
     ref,
     () => ({
-      open(container) {
+      open(container, host, toggle, mode) {
+        const requestedMode = mode ? { mode } : undefined
         setViews((current) =>
           current.some((view) => view.container === container)
             ? current.map((view) =>
-                view.container === container ? { ...view, visible: !view.visible } : view,
+                view.container === container
+                  ? { ...view, visible: toggle ? !view.visible : true, requestedMode }
+                  : view,
               )
-            : [...current, { container, visible: true }],
+            : [...current, { container, host, visible: true, requestedMode }],
         )
       },
     }),
@@ -434,7 +446,9 @@ function IconTile({
 
 function IconView({
   container,
+  host,
   visible,
+  requestedMode,
   saved,
   presetFavorites,
   removedPresetIds,
@@ -443,7 +457,9 @@ function IconView({
   choosePreset,
 }: {
   container: HTMLElement
+  host: HTMLElement
   visible: boolean
+  requestedMode?: { mode: Mode }
   saved: Saved
   presetFavorites: number[]
   removedPresetIds: number[]
@@ -474,6 +490,7 @@ function IconView({
   }>({ busy: true, message: "불러오는 중…", retry: null })
   const revision = useRef(0)
   const alive = useRef(true)
+  const appliedMode = useRef<typeof requestedMode>(undefined)
   const grid = useRef<HTMLDivElement>(null)
   const pages = useRef<HTMLElement>(null)
   const select = useRef<HTMLButtonElement>(null)
@@ -555,6 +572,12 @@ function IconView({
       revision.current++
     }
   }, [])
+
+  useEffect(() => {
+    if (!requestedMode || !ready || loading.busy || appliedMode.current === requestedMode) return
+    appliedMode.current = requestedMode
+    changeMode(requestedMode.mode)
+  }, [requestedMode, ready, loading.busy])
 
   async function request<T>(
     action: () => Promise<T>,
@@ -712,15 +735,26 @@ function IconView({
     try {
       const wrapper = image.closest(".common_write_wrapper")
       if (!wrapper || typeof window.app?.select_icon !== "function")
-        throw new Error("댓글 입력창을 찾을 수 없습니다.")
+        throw new Error("입력창을 찾을 수 없습니다.")
+      const isEditor = !!image.closest("#editor_common_write_wrapper")
+      if (isEditor && !editorIconReady()) throw new Error("글쓰기 에디터가 준비되지 않았습니다.")
+      const countEditorIcons = () =>
+        Array.from(
+          new DOMParser()
+            .parseFromString(window.seditor.getHtml(), "text/html")
+            .querySelectorAll<HTMLImageElement | HTMLVideoElement>("img, video"),
+        ).filter((node) => node.src === image.src).length
+      const before = isEditor ? countEditorIcons() : 0
       await window.app.select_icon(image)
       if (!alive.current) return
       if (
-        !Array.from(
-          wrapper.querySelectorAll<HTMLImageElement | HTMLVideoElement>(".icon_preview"),
-        ).some((preview) => preview.src === image.src)
+        isEditor
+          ? countEditorIcons() <= before
+          : !Array.from(
+              wrapper.querySelectorAll<HTMLImageElement | HTMLVideoElement>(".icon_preview"),
+            ).some((preview) => preview.src === image.src)
       )
-        throw new Error("아이콘 미리보기를 만들지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
+        throw new Error("아이콘을 삽입하지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
       preserveReorderFocus()
       updateSaved((current) => ({
         ...current,
@@ -967,24 +1001,90 @@ function IconView({
         </div>
       )}
     </section>,
-    container,
+    host,
   )
 }
 
-export function openRuriconIconView(container: HTMLElement) {
+export function openRuriconIconView(container: HTMLElement, toggle = true, mode?: Mode) {
   if (!appRoot) {
     appRoot = document.createElement("div")
     document.body.append(appRoot)
     renderView(<CommentIconApp ref={appRef} />, appRoot)
   }
-  if (!ownedContainers.has(container)) {
+  let host = ownedContainers.get(container)
+  if (!host) {
+    // Native editor CSS hides .comment_icon > div:first-child.
+    host = container.matches("#editor_common_write_wrapper .comment_icon")
+      ? document.createElement("section")
+      : container
     container.replaceChildren()
-    ownedContainers.add(container)
+    if (host !== container) container.append(host)
+    ownedContainers.set(container, host)
   }
-  appRef.current!.open(container)
+  appRef.current!.open(container, host, toggle, mode)
+}
+
+function editorIconReady() {
+  return (
+    window.app?.g_comment_icon_data?.is_editor === true &&
+    typeof window.app.g_comment_icon_data.editor_insert_callback === "function" &&
+    typeof window.app.select_icon === "function" &&
+    typeof window.seditor?.getHtml === "function" &&
+    typeof HTMLDialogElement !== "undefined"
+  )
 }
 
 export function mountCommentIconHook() {
+  let restoreEditorHook: (() => void) | undefined
+  const nativeWrites = new MutationObserver(() => {
+    for (const [container, host] of ownedContainers) {
+      // An AJAX response started before interception can still replace the native container.
+      if (
+        host !== container &&
+        container.isConnected &&
+        host.parentElement !== container &&
+        editorIconReady()
+      )
+        container.replaceChildren(host)
+    }
+  })
+  const installEditorHook = () => {
+    const container = document.querySelector<HTMLElement>(
+      "#editor_common_write_wrapper .comment_icon",
+    )
+    if (!container) return
+    const app = window.app
+    const original = app?.comment_icon
+    if (typeof original !== "function") return
+    const hooked: NonNullable<App["comment_icon"]> = function (
+      this: App,
+      container,
+      position,
+      type,
+    ) {
+      if (container?.matches("#editor_common_write_wrapper .comment_icon") && editorIconReady()) {
+        openRuriconIconView(container, false, type === "preset" ? "imagePreset" : "all")
+        return
+      }
+      return original.call(this, container, position, type)
+    }
+    app.comment_icon = hooked
+    restoreEditorHook = () => {
+      if (app.comment_icon === hooked) app.comment_icon = original
+    }
+    nativeWrites.observe(container, { childList: true })
+    if (editorIconReady()) openRuriconIconView(container, false)
+    observer.disconnect()
+  }
+  // Native installs its functions and editor DOM lazily; stop observing once hooked.
+  const observer = new MutationObserver(installEditorHook)
+  if (
+    /\/(?:write|modify)(?:\/|$)/.test(location.pathname) ||
+    document.querySelector("#editor_common_write_wrapper")
+  ) {
+    observer.observe(document.documentElement, { childList: true, subtree: true })
+    installEditorHook()
+  }
   const onClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return
     const nativeButton = event.target.closest<HTMLElement>(
@@ -1011,6 +1111,9 @@ export function mountCommentIconHook() {
   }
   document.addEventListener("click", onClick, true)
   return () => {
+    observer.disconnect()
+    nativeWrites.disconnect()
+    restoreEditorHook?.()
     document.removeEventListener("click", onClick, true)
     if (appRoot) {
       renderView(null, appRoot)

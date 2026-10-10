@@ -21,7 +21,14 @@ assert.ok(code.includes("// @run-at document-idle\n"))
 const styles = []
 const buttons = []
 const listeners = new Map()
+let observerDisconnects = 0
 runInNewContext(code, {
+  MutationObserver: class {
+    observe() {}
+    disconnect() {
+      observerDisconnects++
+    }
+  },
   console: { log() {} },
   document: {
     addEventListener() {},
@@ -32,7 +39,10 @@ runInNewContext(code, {
     body: { append: (button) => buttons.push(button) },
   },
   window: { addEventListener: (name, callback) => listeners.set(name, callback) },
-  location: { href: "https://bbs.ruliweb.com/community/board/98/write" },
+  location: {
+    href: "https://bbs.ruliweb.com/community/board/98/write",
+    pathname: "/community/board/98/write",
+  },
 })
 await Promise.resolve()
 assert.equal(styles.length, 1)
@@ -41,5 +51,7 @@ assert.equal(buttons.length, 1)
 assert.equal(buttons[0].textContent, "Rulicon 실행 확인")
 assert.ok(listeners.has("pagehide"))
 listeners.get("pagehide")({ persisted: true })
+assert.equal(observerDisconnects, 0)
 listeners.get("pagehide")({ persisted: false })
+assert.equal(observerDisconnects, 2)
 console.log("PASS: userscript metadata, standalone JS/CSS, editor startup and pagehide")

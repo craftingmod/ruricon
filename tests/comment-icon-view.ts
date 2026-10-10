@@ -44,6 +44,10 @@ window.confirm = (message) => {
 let nativeCalls = 0
 window.app = {
   select_icon(image) {
+    if (window.app.g_comment_icon_data?.is_editor) {
+      window.app.g_comment_icon_data.editor_insert_callback?.(image.src)
+      return
+    }
     const wrapper = image.closest(".common_write_wrapper")!
     wrapper.querySelector(".icon_preview")?.remove()
     const preview = document.createElement("img")
@@ -188,6 +192,13 @@ window.fetch = async (input, options) => {
 localStorage.removeItem("ruricon:icon-view:v1")
 localStorage.removeItem("ruricon:preset-favorites:v1")
 localStorage.removeItem("ruricon:hidden-ad-presets:v1")
+const editorFixture = document.createElement("div")
+const originalEditorCommentIcon = window.app.comment_icon!
+if (location.search === "?editor") {
+  editorFixture.innerHTML = `<style>.comment_icon > div:first-child { display: none !important; }</style><div class="common_write_wrapper" id="editor_comment_icon_pc_panel"><div id="editor_common_write_wrapper"><span id="btn_icon_pick_pc">아이콘</span><span id="btn_icon_preset_pc">프리셋</span></div></div><div class="note-editable" contenteditable="true"></div>`
+  document.body.append(editorFixture)
+  delete window.app.comment_icon
+}
 const cleanup = mountCommentIconHook()
 const tick = async () => {
   for (let index = 0; index < 12; index++) await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1068,6 +1079,132 @@ async function checkModalScrollLock() {
   spacer.remove()
 }
 async function check() {
+  if (location.search === "?editor") {
+    const editor = editorFixture.querySelector<HTMLElement>(".note-editable")!
+    window.seditor = {
+      ref: editor,
+      getHtml: () => editor.innerHTML,
+      setHtml: (html) => {
+        editor.innerHTML = html
+      },
+    }
+    window.app.g_comment_icon_data = {
+      is_editor: true,
+      editor_insert_callback: (src) => {
+        const node = document.createElement(src.includes(".mp4") ? "video" : "img")
+        node.src = src
+        editor.append(node)
+      },
+    }
+    window.app.comment_icon = originalEditorCommentIcon
+    const container = document.createElement("div")
+    container.className = "comment_icon"
+    editorFixture.querySelector("#editor_common_write_wrapper")!.append(container)
+    await tick()
+    await waitFor(() => !!container.querySelector(".ruricon-icon-insert"))
+    assert(window.app.comment_icon !== originalEditorCommentIcon, "Lazy Native function is hooked")
+    const view = container.querySelector(".ruricon-icon-view")!
+    assert(
+      view.getBoundingClientRect().width > 0 && view.getBoundingClientRect().height > 0,
+      "Native header CSS does not hide the custom view",
+    )
+    container.innerHTML = "<div>Late Native AJAX response</div>"
+    await tick()
+    assert(
+      container.querySelector(".ruricon-icon-view") === view,
+      "Late response retains the mounted view",
+    )
+    assert(
+      view.getBoundingClientRect().height > 0,
+      "The retained view stays visible after a late Native response",
+    )
+    let rangeSaves = 0
+    const saveRange = () => {
+      rangeSaves++
+    }
+    document.addEventListener("click", saveRange)
+    for (const [id, type] of [
+      ["btn_icon_pick_pc", "pick"],
+      ["btn_icon_preset_pc", "preset"],
+    ]) {
+      editorFixture.querySelector(`#${id}`)!.addEventListener("click", () => {
+        window.app.comment_icon!(container, null, type)
+      })
+    }
+    click("#btn_icon_pick_pc", editorFixture)
+    await tick()
+    assert(rangeSaves === 1 && !container.hidden, "Native click bubbles to cursor saving")
+    click("#btn_icon_pick_pc", editorFixture)
+    await tick()
+    assert(!container.hidden, "Repeated Native calls show rather than toggle the view")
+    window.app.comment_icon!(document.querySelector("#comment .comment_icon")!, null, "pick")
+    assert(nativeCalls === 1, "Other containers retain the Native function")
+    await choose("Native", container)
+    click(".ruricon-icon-insert", container)
+    await tick()
+    click(".ruricon-icon-insert", container)
+    await tick()
+    assert(
+      editor.querySelectorAll("img").length === 2,
+      "Repeated image insertion uses the editor callback",
+    )
+    assert(
+      !container.textContent?.includes("삽입하지 못했습니다"),
+      "Editor insertion needs no comment preview",
+    )
+    const videoTile = container
+      .querySelector(".ruricon-icon-tile video")!
+      .closest(".ruricon-icon-tile")!
+    click(".ruricon-icon-insert", videoTile)
+    await tick()
+    assert(editor.querySelectorAll("video").length === 1, "Video insertion uses the same callback")
+    const insert = window.app.select_icon
+    window.app.select_icon = () => {}
+    click(".ruricon-icon-insert", container)
+    await tick()
+    assert(
+      container.textContent?.includes("삽입하지 못했습니다"),
+      "Existing matching content cannot hide a failed insertion",
+    )
+    window.app.select_icon = insert
+    click("#btn_icon_preset_pc", editorFixture)
+    await tick()
+    await waitFor(
+      () =>
+        container
+          .querySelector('.ruricon-icon-tabs button[aria-label="개인 저장소"]')
+          ?.getAttribute("aria-pressed") === "true",
+    )
+    await waitFor(() => container.querySelectorAll(".ruricon-icon-insert").length === 48)
+    click('.ruricon-icon-tabs button[aria-label="전체"]', container)
+    await tick()
+    click("#btn_icon_preset_pc", editorFixture)
+    await tick()
+    assert(
+      container
+        .querySelector('.ruricon-icon-tabs button[aria-label="개인 저장소"]')
+        ?.getAttribute("aria-pressed") === "true",
+      "Repeated preset requests restore personal storage",
+    )
+    window.app.g_comment_icon_data.editor_insert_callback = null
+    window.app.comment_icon!(container, null, "pick")
+    assert(Number(nativeCalls) === 2, "Unavailable editor adapter preserves Native fallback")
+    document.removeEventListener("click", saveRange)
+    void act(cleanup)
+    assert(
+      window.app.comment_icon === originalEditorCommentIcon,
+      "Cleanup restores the owned Native function",
+    )
+    const unmount = mountCommentIconHook()
+    const replacement = () => {}
+    window.app.comment_icon = replacement
+    unmount()
+    assert(window.app.comment_icon === replacement, "Cleanup preserves another owner's replacement")
+    result.textContent =
+      "PASS: late editor initialization/AJAX, Native routing, cursor event, repeated open, image/video insertion, preset tab and cleanup"
+    result.dataset.result = "PASS"
+    return
+  }
   if (location.search === "?modal-scroll-lock") {
     await checkModalScrollLock()
     result.textContent =

@@ -7,7 +7,7 @@ import { join, resolve, relative } from "node:path"
 import { chromeExec } from "../entrypoints/lib/constants.ts"
 
 const port = 5187
-const url = `http://127.0.0.1:${port}/tests/comment-icon-view.html${process.argv.includes("--preset-dialog") ? "?preset-dialog" : process.argv.includes("--image-preset") ? "?image-preset" : ""}`
+const url = `http://127.0.0.1:${port}/tests/comment-icon-view.html${process.argv.includes("--editor") ? "?editor" : process.argv.includes("--preset-dialog") ? "?preset-dialog" : process.argv.includes("--image-preset") ? "?image-preset" : ""}`
 const server = spawn(
   process.execPath,
   ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
