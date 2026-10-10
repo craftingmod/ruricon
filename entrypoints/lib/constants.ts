@@ -8,6 +8,8 @@ export const chromeExec = "C:/Program Files/Google/Chrome Beta/Application/chrom
 export const editorPages = [
   getEditUrl(false, iconBoardId, "write"),
   getEditUrl(false, iconBoardId, "modify/*"),
+  getEditUrl(true, iconBoardId, "write"),
+  getEditUrl(true, iconBoardId, "modify/*"),
 ]
 
 export const contentSample = `
