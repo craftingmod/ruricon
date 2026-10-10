@@ -11,6 +11,7 @@ function App() {
       </a>
       <h1>Ruricon</h1>
       <p class="read-the-docs">Ruliweb icon extension</p>
+      <p>Version: v0.0.1-dev</p>
     </div>
   )
 }
