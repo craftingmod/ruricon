@@ -25,6 +25,19 @@ export type IconPage = {
 export type IconCollection = { title: string; pages: IconPage[]; nativeId: number | null }
 export const fixedAdPresetIds = [1917, 3213]
 
+export function orderIconImages(
+  images: string[],
+  favorites: Set<string>,
+  recent: Map<string, number>,
+  prioritizeRecent: boolean,
+) {
+  return [...images].sort(
+    (a, b) =>
+      Number(favorites.has(b)) - Number(favorites.has(a)) ||
+      (favorites.has(a) || !prioritizeRecent ? 0 : (recent.get(a) ?? 10) - (recent.get(b) ?? 10)),
+  )
+}
+
 export function orderPresets(presets: Preset[], favorites: number[]) {
   const positions = new Map(favorites.map((id, index) => [id, index]))
   return [...presets].sort(

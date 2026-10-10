@@ -31,6 +31,7 @@ runInNewContext(code, {
   },
   console: { log() {} },
   document: {
+    documentElement: { style: {} },
     addEventListener() {},
     removeEventListener() {},
     querySelector: () => null,

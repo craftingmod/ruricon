@@ -214,7 +214,7 @@
   border-color: transparent;
 }
 .ruricon-icon-grid,
-.ruricon-icon-test-list {
+.ruricon-icon-virtual-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--ruricon-icon-size), 1fr));
 
@@ -232,7 +232,7 @@
   padding: 3px;
   justify-content: start;
 }
-.ruricon-icon-grid.ruricon-icon-test {
+.ruricon-icon-grid.ruricon-icon-virtual {
   display: block;
   height: min(50dvh, 480px);
   overflow: hidden;

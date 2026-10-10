@@ -17,8 +17,20 @@ import {
   X,
 } from "lucide-preact"
 import { createPortal, createRef, h, render as renderView, type Ref } from "preact"
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "preact/hooks"
-import { VirtuosoGrid, type GridScrollSeekPlaceholderProps } from "react-virtuoso"
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks"
+import {
+  VirtuosoGrid,
+  type GridScrollSeekPlaceholderProps,
+  type VirtuosoGridHandle,
+} from "react-virtuoso"
 
 import {
   PresetDialog,
@@ -27,16 +39,16 @@ import {
   type DialogState,
 } from "../../components/preset-dialog.tsx"
 import { cx } from "../lib/cx.ts"
+import { iconGridPage } from "../lib/icon-grid.ts"
 import {
   loadCollection,
   loadAllIconImages,
   fixedAdPresetIds,
-  loadNativePage,
   loadPresets,
   orderPresets,
+  orderIconImages,
   removePresetFavorites,
   type IconCollection,
-  type IconPage,
   type Preset,
 } from "../lib/icon-view.ts"
 import { mobileDomain, pcDomain } from "../lib/ruli-constants.ts"
@@ -64,12 +76,12 @@ const appRef = createRef<AppHandle>()
 const ownedContainers = new Map<HTMLElement, HTMLElement>()
 let appRoot: HTMLElement | null = null
 
-const testGridComponents = {
+const gridComponents = {
   ScrollSeekPlaceholder: ({ height, width }: GridScrollSeekPlaceholderProps) => (
     <div class="ruricon-icon-seek-placeholder" style={{ height, width }} aria-hidden="true" />
   ),
 }
-const testScrollSeek = {
+const scrollSeek = {
   enter: (velocity: number) => Math.abs(velocity) > 1200,
   exit: (velocity: number) => Math.abs(velocity) < 50,
 }
@@ -494,9 +506,7 @@ function IconView({
   const selectionMode = mode === "favorites" && editMode
   const selectedCount = saved.favorites.filter((src) => selection.has(src)).length
   const [pageIndex, setPageIndex] = useState(0)
-  const [testPage, setTestPage] = useState(false)
-  const [testImages, setTestImages] = useState<string[]>([])
-  const [nativePages, setNativePages] = useState(new Map<number, string[]>())
+  const [allImages, setAllImages] = useState<string[]>([])
   const [ready, setReady] = useState(false)
   const [loading, setLoading] = useState<{
     busy: boolean
@@ -507,47 +517,46 @@ function IconView({
   const alive = useRef(true)
   const appliedMode = useRef<typeof requestedMode>(undefined)
   const grid = useRef<HTMLDivElement>(null)
-  const pages = useRef<HTMLElement>(null)
+  const gridRef = useRef<VirtuosoGridHandle>(null)
+  const pageJump = useRef(false)
+  const pageJumpTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scrollSeekConfiguration = useMemo(
+    () => ({
+      enter: (velocity: number) => !pageJump.current && scrollSeek.enter(velocity),
+      exit: (velocity: number) => pageJump.current || scrollSeek.exit(velocity),
+    }),
+    [],
+  )
   const select = useRef<HTMLButtonElement>(null)
   const reorderedFocus = useRef<HTMLElement | null>(null)
   const local =
     mode === "imagePreset" ? imagePreset : mode === "favorites" ? saved.favorites : saved.recent
-  const total = mode === "all" ? (collection?.pages[0]?.total ?? 0) : local.length
-  const pageCount =
-    mode !== "all"
-      ? 0
-      : collection?.nativeId === null
-        ? collection.pages.length
-        : Math.ceil(total / 100)
+  const pageCount = mode === "all" ? Math.ceil(allImages.length / 100) : 0
   const index = Math.max(0, Math.min(pageIndex, Math.max(0, pageCount - 1)))
-  const images =
-    mode !== "all"
-      ? local
-      : collection?.nativeId === null
-        ? (collection.pages[index]?.images ?? [])
-        : (nativePages.get(index) ?? [])
-  const favorites = new Set(saved.favorites)
-  const setImages = new Set(
-    collection?.nativeId === null
-      ? collection.pages.flatMap((page) => page.images)
-      : [...nativePages.values()].flat(),
+  const images = mode === "all" ? allImages : local
+  const favorites = useMemo(() => new Set(saved.favorites), [saved.favorites])
+  const recent = useMemo(() => {
+    const setImages = new Set(allImages)
+    return new Map(
+      saved.recent
+        .filter((src) => setImages.has(src))
+        .slice(0, 10)
+        .map((src, index) => [src, index]),
+    )
+  }, [allImages, saved.recent])
+  const orderedImages = useMemo(
+    () =>
+      mode === "all" ? orderIconImages(images, favorites, recent, saved.prioritizeRecent) : images,
+    [mode, images, favorites, saved.prioritizeRecent, recent],
   )
-  const recent = new Map(
-    saved.recent
-      .filter((src) => setImages.has(src))
-      .slice(0, 10)
-      .map((src, index) => [src, index]),
-  )
-  const orderedImages =
-    mode === "all"
-      ? [...images].sort(
-          (a, b) =>
-            Number(favorites.has(b)) - Number(favorites.has(a)) ||
-            (favorites.has(a) || !saved.prioritizeRecent
-              ? 0
-              : (recent.get(a) ?? 10) - (recent.get(b) ?? 10)),
-        )
-      : images
+  const itemKeys = useMemo(() => {
+    const occurrences = new Map<string, number>()
+    return orderedImages.map((src) => {
+      const occurrence = occurrences.get(src) ?? 0
+      occurrences.set(src, occurrence + 1)
+      return JSON.stringify([src, occurrence])
+    })
+  }, [orderedImages])
 
   useLayoutEffect(() => {
     container.hidden = !visible
@@ -559,8 +568,11 @@ function IconView({
   }, [visible, mode, editMode, selected?.id])
 
   useLayoutEffect(() => {
+    pageJump.current = false
+    clearTimeout(pageJumpTimeout.current)
     grid.current?.scrollTo({ top: 0, behavior: "instant" })
-  }, [selected?.id, mode, index])
+    gridRef.current?.scrollTo({ top: 0, behavior: "auto" })
+  }, [selected?.id, mode])
 
   useLayoutEffect(() => {
     if (reorderedFocus.current) {
@@ -576,13 +588,12 @@ function IconView({
         target?.focus({ preventScroll: true })
       }
     }
-    if (document.activeElement?.parentElement === pages.current)
-      pages.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus()
   })
 
   useEffect(() => {
     void initialize()
     return () => {
+      clearTimeout(pageJumpTimeout.current)
       alive.current = false
       revision.current++
     }
@@ -621,58 +632,43 @@ function IconView({
   }
 
   async function selectPreset(preset: Preset) {
-    setTestPage(false)
     setSelected(preset)
     setMode("all")
     setPageIndex(0)
     setCollection(null)
-    setNativePages(new Map())
-    await request<IconCollection>(
-      (previous) => loadCollection(preset, previous),
-      (result) => {
-        const loaded = { ...preset, imageCount: result.pages[0]?.total ?? 0 }
-        setCollection(result)
+    setAllImages([])
+    await request<{ collection: IconCollection; images: string[] }>(
+      async (previous) => {
+        const collection = await loadCollection(preset)
+        const images = await loadAllIconImages(preset, (images) => previous({ collection, images }))
+        return { collection, images }
+      },
+      ({ collection, images }) => {
+        const loaded = { ...preset, imageCount: images.length }
+        setCollection(collection)
+        setAllImages(images)
         setSelected(loaded)
         setPresets((current) => current.map((item) => (item.id === preset.id ? loaded : item)))
-        setNativePages(new Map([[0, result.pages[0]?.images ?? []]]))
         updateSaved((current) => ({ ...current, presetId: preset.id }))
       },
       () => selectPreset(preset),
     )
   }
 
-  async function changePage(next: number) {
-    setTestPage(false)
-    setPageIndex(next)
-    if (mode !== "all" || !collection?.nativeId) {
-      revision.current++
-      setLoading({ busy: false, message: "", retry: null })
-      return
-    }
-    const id = collection.nativeId
-    await request<IconPage>(
-      (previous) => loadNativePage(id, next * 100, previous),
-      (result) => {
-        setNativePages((current) => new Map(current).set(next, result.images))
-        setCollection((current) =>
-          current && current.nativeId === id
-            ? { ...current, pages: current.pages.map((page) => ({ ...page, total: result.total })) }
-            : current,
-        )
-      },
-      () => changePage(next),
-    )
-  }
-
-  async function openTestPage() {
-    if (!selected) return
-    setTestPage(true)
-    setTestImages([])
-    await request<string[]>(
-      (previous) => loadAllIconImages(selected, previous),
-      setTestImages,
-      openTestPage,
-    )
+  function changePage(next: number) {
+    if (!gridRef.current || !pageCount) return
+    // The jump's velocity must settle before Scroll Seek resumes.
+    pageJump.current = true
+    clearTimeout(pageJumpTimeout.current)
+    // A jump to the current/clamped position may emit no isScrolling event.
+    pageJumpTimeout.current = setTimeout(() => {
+      pageJump.current = false
+    }, 250)
+    gridRef.current.scrollToIndex({
+      index: Math.max(0, Math.min(next, pageCount - 1)) * 100,
+      align: "start",
+      behavior: "auto",
+    })
   }
 
   async function initialize() {
@@ -693,7 +689,6 @@ function IconView({
   }
 
   function changeMode(next: Mode) {
-    setTestPage(false)
     revision.current++
     setMode(next)
     setPageIndex(0)
@@ -715,96 +710,155 @@ function IconView({
     )
   }
 
-  function preserveReorderFocus() {
+  const preserveReorderFocus = useCallback(() => {
     const focused = document.activeElement
     if (focused instanceof HTMLElement && grid.current?.contains(focused)) {
       // Moving a focused icon makes the browser scroll it into view.
       reorderedFocus.current = focused
       focused.blur()
     }
-  }
+  }, [])
 
-  function setFavorite(src: string, favorite: boolean) {
-    if (favorite && !saved.favorites.includes(src) && saved.favorites.length >= localIconLimit) {
-      setLoading((current) => ({
-        ...current,
-        message: `즐겨찾기는 최대 ${localIconLimit}개까지 저장할 수 있습니다.`,
-      }))
-      return
-    }
-    preserveReorderFocus()
-    updateSaved((current) => {
-      if (current.favorites.includes(src) === favorite) return current
-      if (favorite && current.favorites.length >= localIconLimit) return current
-      return {
-        ...current,
-        favorites: favorite
-          ? [src, ...current.favorites]
-          : current.favorites.filter((url) => url !== src),
+  const setFavorite = useCallback(
+    (src: string, favorite: boolean) => {
+      if (favorite && !saved.favorites.includes(src) && saved.favorites.length >= localIconLimit) {
+        setLoading((current) => ({
+          ...current,
+          message: `즐겨찾기는 최대 ${localIconLimit}개까지 저장할 수 있습니다.`,
+        }))
+        return
       }
-    })
-  }
+      preserveReorderFocus()
+      updateSaved((current) => {
+        if (current.favorites.includes(src) === favorite) return current
+        if (favorite && current.favorites.length >= localIconLimit) return current
+        return {
+          ...current,
+          favorites: favorite
+            ? [src, ...current.favorites]
+            : current.favorites.filter((url) => url !== src),
+        }
+      })
+    },
+    [saved.favorites, updateSaved, preserveReorderFocus],
+  )
 
-  function moveFavoriteToFront(src: string) {
-    if (saved.favorites.indexOf(src) <= 0) return
-    preserveReorderFocus()
-    updateSaved((current) =>
-      current.favorites.indexOf(src) <= 0
-        ? current
-        : {
-            ...current,
-            favorites: [src, ...current.favorites.filter((url) => url !== src)],
-          },
-    )
-  }
+  const moveFavoriteToFront = useCallback(
+    (src: string) => {
+      if (saved.favorites.indexOf(src) <= 0) return
+      preserveReorderFocus()
+      updateSaved((current) =>
+        current.favorites.indexOf(src) <= 0
+          ? current
+          : {
+              ...current,
+              favorites: [src, ...current.favorites.filter((url) => url !== src)],
+            },
+      )
+    },
+    [saved.favorites, updateSaved, preserveReorderFocus],
+  )
 
-  function selectIcon(src: string) {
+  const selectIcon = useCallback((src: string) => {
     setSelection((current) => {
       const next = new Set(current)
       if (next.has(src)) next.delete(src)
       else next.add(src)
       return next
     })
-  }
+  }, [])
 
-  async function insertIcon(image: HTMLImageElement, src: string) {
-    try {
-      const wrapper = image.closest(".common_write_wrapper")
-      if (!wrapper || typeof window.app?.select_icon !== "function")
-        throw new Error("입력창을 찾을 수 없습니다.")
-      const isEditor = !!image.closest("#editor_common_write_wrapper")
-      if (isEditor && !editorIconReady()) throw new Error("글쓰기 에디터가 준비되지 않았습니다.")
-      const countEditorIcons = () =>
-        Array.from(
-          new DOMParser()
-            .parseFromString(window.seditor.getHtml(), "text/html")
-            .querySelectorAll<HTMLImageElement | HTMLVideoElement>("img, video"),
-        ).filter((node) => node.src === image.src).length
-      const before = isEditor ? countEditorIcons() : 0
-      await window.app.select_icon(image)
-      if (!alive.current) return
-      if (
-        isEditor
-          ? countEditorIcons() <= before
-          : !Array.from(
-              wrapper.querySelectorAll<HTMLImageElement | HTMLVideoElement>(".icon_preview"),
-            ).some((preview) => preview.src === image.src)
-      )
-        throw new Error("아이콘을 삽입하지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
-      preserveReorderFocus()
-      updateSaved((current) => ({
-        ...current,
-        recent: [src, ...current.recent.filter((url) => url !== src)].slice(0, localIconLimit),
-      }))
-      setLoading((current) => ({ ...current, message: "" }))
-    } catch (error) {
-      if (alive.current)
-        setLoading((current) => ({
+  const insertIcon = useCallback(
+    async (image: HTMLImageElement, src: string) => {
+      try {
+        const wrapper = image.closest(".common_write_wrapper")
+        if (!wrapper || typeof window.app?.select_icon !== "function")
+          throw new Error("입력창을 찾을 수 없습니다.")
+        const isEditor = !!image.closest("#editor_common_write_wrapper")
+        if (isEditor && !editorIconReady()) throw new Error("글쓰기 에디터가 준비되지 않았습니다.")
+        const countEditorIcons = () =>
+          Array.from(
+            new DOMParser()
+              .parseFromString(window.seditor.getHtml(), "text/html")
+              .querySelectorAll<HTMLImageElement | HTMLVideoElement>("img, video"),
+          ).filter((node) => node.src === image.src).length
+        const before = isEditor ? countEditorIcons() : 0
+        await window.app.select_icon(image)
+        if (!alive.current) return
+        if (
+          isEditor
+            ? countEditorIcons() <= before
+            : !Array.from(
+                wrapper.querySelectorAll<HTMLImageElement | HTMLVideoElement>(".icon_preview"),
+              ).some((preview) => preview.src === image.src)
+        )
+          throw new Error("아이콘을 삽입하지 못했습니다. 기본 아이콘 기능을 확인해주세요.")
+        preserveReorderFocus()
+        updateSaved((current) => ({
           ...current,
-          message: error instanceof Error ? error.message : "아이콘을 삽입하지 못했습니다.",
+          recent: [src, ...current.recent.filter((url) => url !== src)].slice(0, localIconLimit),
         }))
-    }
-  }
+        setLoading((current) => ({ ...current, message: "" }))
+      } catch (error) {
+        if (alive.current)
+          setLoading((current) => ({
+            ...current,
+            message: error instanceof Error ? error.message : "아이콘을 삽입하지 못했습니다.",
+          }))
+      }
+    },
+    [updateSaved, preserveReorderFocus],
+  )
+
+  // Indicator updates must not replace Virtuoso's render callbacks.
+  const virtualGrid = useMemo(
+    () => (
+      <VirtuosoGrid
+        ref={gridRef}
+        key={`${mode}:${selected?.id}`}
+        style={{ height: "100%" }}
+        data={orderedImages}
+        components={gridComponents}
+        scrollSeekConfiguration={scrollSeekConfiguration}
+        isScrolling={(scrolling) => {
+          clearTimeout(pageJumpTimeout.current)
+          if (!scrolling) pageJump.current = false
+        }}
+        computeItemKey={(position) => itemKeys[position]}
+        listClassName="ruricon-icon-virtual-list"
+        stateChanged={mode === "all" ? (state) => setPageIndex(iconGridPage(state)) : undefined}
+        itemContent={(position, src) => (
+          <IconTile
+            src={src}
+            index={position}
+            favorite={favorites.has(src)}
+            recent={mode === "all" && recent.has(src)}
+            insert={insertIcon}
+            setFavorite={setFavorite}
+            moveFavoriteToFront={mode === "favorites" && editMode ? moveFavoriteToFront : undefined}
+            selectIcon={selectionMode ? selectIcon : undefined}
+            selected={selectionMode && selection.has(src)}
+          />
+        )}
+      />
+    ),
+    [
+      selected?.id,
+      mode,
+      editMode,
+      selectionMode,
+      selection,
+      orderedImages,
+      itemKeys,
+      favorites,
+      recent,
+      insertIcon,
+      setFavorite,
+      moveFavoriteToFront,
+      selectIcon,
+      scrollSeekConfiguration,
+    ],
+  )
 
   return createPortal(
     <section
@@ -845,7 +899,7 @@ function IconView({
             !ready
               ? "프리셋 불러오는 중…"
               : collection
-                ? `${collection.title} - ${collection.pages[0]?.total ?? 0}개`
+                ? `${collection.title} - ${allImages.length}개`
                 : (selected?.title ?? "프리셋 선택")
           }
         />
@@ -889,38 +943,23 @@ function IconView({
             </button>
           ))}
         </div>
-        <nav
-          ref={pages}
-          class="ruricon-icon-pages"
-          aria-label="아이콘 페이지"
-          hidden={mode !== "all"}
-        >
+        <nav class="ruricon-icon-pages" aria-label="아이콘 페이지" hidden={mode !== "all"}>
           {Array.from({ length: pageCount }, (_, page) => {
-            const number = collection?.nativeId === null ? collection.pages[page].number : page + 1
+            const number = page + 1
             return (
               <button
                 key={number}
                 type="button"
                 aria-label={`${number}페이지`}
-                aria-current={!testPage && page === index ? "page" : undefined}
+                aria-current={page === index ? "page" : undefined}
                 onClick={() => {
-                  void changePage(page)
+                  changePage(page)
                 }}
               >
                 {number}
               </button>
             )
           })}
-          <button
-            type="button"
-            aria-label="Test"
-            title="Virtuoso 실험: 모든 페이지의 아이콘"
-            aria-current={testPage ? "page" : undefined}
-            disabled={loading.busy || !selected}
-            onClick={() => void openTestPage()}
-          >
-            Test
-          </button>
         </nav>
         <div class="ruricon-icon-actions">
           <button
@@ -998,49 +1037,27 @@ function IconView({
       </button>
       <div
         ref={grid}
-        class={cx("ruricon-icon-grid", testPage && "ruricon-icon-test")}
-        aria-label={testPage ? `Test 아이콘 ${testImages.length}개` : "아이콘 목록"}
+        class={cx(
+          "ruricon-icon-grid",
+          mode !== "imagePreset" && images.length > 0 && "ruricon-icon-virtual",
+        )}
+        aria-label="아이콘 목록"
       >
-        {testPage ? (
-          <VirtuosoGrid
-            key={selected?.id}
-            style={{ height: "100%" }}
-            data={testImages}
-            components={testGridComponents}
-            scrollSeekConfiguration={testScrollSeek}
-            computeItemKey={(position) => position}
-            listClassName="ruricon-icon-test-list"
-            itemContent={(position, src) => (
+        {mode !== "imagePreset"
+          ? images.length > 0 && virtualGrid
+          : orderedImages.map((src, position) => (
               <IconTile
+                key={src}
                 src={src}
                 index={position}
                 favorite={favorites.has(src)}
-                recent={recent.has(src)}
+                recent={false}
                 insert={insertIcon}
                 setFavorite={setFavorite}
                 selected={false}
               />
-            )}
-          />
-        ) : (
-          orderedImages.map((src, position) => (
-            <IconTile
-              key={src}
-              src={src}
-              index={position}
-              favorite={favorites.has(src)}
-              recent={mode === "all" && recent.has(src)}
-              insert={insertIcon}
-              setFavorite={setFavorite}
-              moveFavoriteToFront={
-                mode === "favorites" && editMode ? moveFavoriteToFront : undefined
-              }
-              selectIcon={selectionMode ? selectIcon : undefined}
-              selected={selectionMode && selection.has(src)}
-            />
-          ))
-        )}
-        {!(testPage ? testImages : images).length && !loading.busy && (
+            ))}
+        {!images.length && !loading.busy && (
           <div class="ruricon-icon-empty" role="img" aria-label="표시할 아이콘이 없습니다.">
             <SquareOff size={32} aria-hidden="true" focusable="false" />
           </div>
