@@ -780,7 +780,54 @@ async function checkPresetDialog(comment: HTMLElement) {
   )
   void act(unmount)
 }
+async function checkInitialShortcutPage() {
+  const comment = document.querySelector<HTMLElement>("#comment")!
+  comment.style.maxWidth = "240px"
+  for (const presetFavorites of [[920], []]) {
+    localStorage.setItem(
+      "ruricon:icon-view:v1",
+      JSON.stringify({ presetId: 5033, favorites: [], recent: [] }),
+    )
+    localStorage.setItem("ruricon:preset-favorites:v1", JSON.stringify(presetFavorites))
+    const unmount = mountCommentIconHook()
+    click("button[onclick]", comment)
+    await tick()
+    const strip = comment.querySelector<HTMLElement>(".ruricon-preset-strip")!
+    assert(
+      comment.querySelector(".ruricon-preset-select")!.textContent!.includes("Native"),
+      "Opening retains the saved preset",
+    )
+    assert(
+      strip.firstElementChild?.getAttribute("data-preset-id") ===
+        String(presetFavorites.length ? 920 : 900),
+      "Opening shows shortcut page zero with favorites first",
+    )
+    if (location.hostname !== "m.ruliweb.com") {
+      const previous = comment.querySelector<HTMLButtonElement>(".ruricon-preset-arrow")!
+      assert(
+        previous.disabled,
+        "Initial shortcut page is zero even when the selected preset is on a later page",
+      )
+      click(".ruricon-preset-arrow:last-child", comment)
+      assert(!previous.disabled, "Manual shortcut paging still works")
+    } else assert(strip.scrollLeft === 0, "Mobile starts at the beginning of the shortcut strip")
+    await choose("냥냥", comment)
+    assert(
+      strip.querySelector('[data-preset-id="900"]')?.getAttribute("aria-pressed") === "true",
+      "Later explicit selection still navigates to the selected shortcut",
+    )
+    void act(unmount)
+  }
+}
 async function check() {
+  if (location.search === "?initial-shortcut-page") {
+    void act(cleanup)
+    await checkInitialShortcutPage()
+    result.textContent =
+      "PASS: shortcut page zero on first open, favorites first, saved preset retained and later navigation"
+    result.dataset.result = "PASS"
+    return
+  }
   assert(getLastId("app.icon_data_show(this, 5033);") === 5033, "Numeric ID isn't truncated")
   assert(getLastId("app.icon_data_show(this, '5033');") === 5033, "Quoted ID")
   assert(getLastId("bad") === null, "Invalid ID")

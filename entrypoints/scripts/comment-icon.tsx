@@ -201,6 +201,7 @@ function PresetShortcuts({
 }) {
   const mobile = location.hostname === mobileDomain
   const strip = useRef<HTMLDivElement>(null)
+  const previousSelected = useRef(selected)
   const [layout, setLayout] = useState({ page: 0, capacity: 1 })
   const pageCount = Math.ceil(presets.length / layout.capacity)
   const page = Math.max(0, Math.min(layout.page, Math.max(0, pageCount - 1)))
@@ -236,6 +237,9 @@ function PresetShortcuts({
   }, [visible, mobile, presets.length])
 
   useLayoutEffect(() => {
+    const previous = previousSelected.current
+    previousSelected.current = selected
+    if (previous === null) return
     setLayout((current) => ({
       ...current,
       page: Math.floor(
