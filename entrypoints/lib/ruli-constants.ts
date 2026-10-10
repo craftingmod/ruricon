@@ -10,6 +10,8 @@ export const iconListUrl = `${iconApi}?&more=0&type=first`
 
 export const iconImagesUrl = `https://${apiDomain}/comment_icon?&more=0&type=first`
 
+export const removeFavorIconUrl = `https://${apiDomain}/comment_icon_pick_remove`
+
 export function getEditUrl(isMobile: boolean, boardId: number, postfix: string) {
   return `https://${(isMobile ?? false) ? mobileDomain : pcDomain}/community/board/${boardId}/${postfix}`
 }

@@ -5,7 +5,7 @@
 .ruricon-icon-view {
   container-type: inline-size;
   box-sizing: border-box;
-  padding: 0 12px 12px;
+  padding: 4px 12px 12px;
   border: 1px solid #aaa6;
   border-radius: 10px;
   background: Canvas;
@@ -50,9 +50,13 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  margin: 8px 0;
-  padding: 8px 12px;
+  margin: 0;
+  padding: 8px;
   text-align: left;
+}
+.ruricon-preset-select-arrow {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .ruricon-icon-tabs {
   display: flex;

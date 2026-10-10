@@ -29,6 +29,7 @@ import {
   loadNativePage,
   loadPresets,
   orderPresets,
+  removePresetFavorites,
   type IconCollection,
   type Preset,
 } from "../lib/icon-view.ts"
@@ -103,6 +104,7 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   const [presetFavorites, setPresetFavorites] = useState(readPresetFavorites)
   const [storageError, setStorageError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
+  const [removedPresetIds, setRemovedPresetIds] = useState<number[]>([])
   const persisted = useRef(saved)
   const persistedPresetFavorites = useRef(presetFavorites)
 
@@ -147,6 +149,7 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
           {...view}
           saved={saved}
           presetFavorites={presetFavorites}
+          removedPresetIds={removedPresetIds}
           updateSaved={setSaved}
           storageError={storageError}
           choosePreset={(request) => setDialog({ ...request, open: true })}
@@ -156,6 +159,14 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
         <PresetDialog
           request={dialog}
           presetFavorites={presetFavorites}
+          removedPresetIds={removedPresetIds}
+          removePreset={async (preset) => {
+            await removePresetFavorites(preset)
+            setRemovedPresetIds((current) => [...current, preset.id])
+            setPresetFavorites((current) =>
+              current.includes(preset.id) ? current.filter((id) => id !== preset.id) : current,
+            )
+          }}
           toggleFavorite={(id) =>
             setPresetFavorites((current) =>
               current.includes(id)
@@ -380,6 +391,7 @@ function IconView({
   visible,
   saved,
   presetFavorites,
+  removedPresetIds,
   updateSaved,
   storageError,
   choosePreset,
@@ -388,12 +400,16 @@ function IconView({
   visible: boolean
   saved: Saved
   presetFavorites: number[]
+  removedPresetIds: number[]
   updateSaved: UpdateSaved
   storageError: string | null
   choosePreset: (request: DialogRequest) => void
 }) {
   const [loadedPresets, setPresets] = useState<Preset[]>([])
-  const presets = orderPresets(loadedPresets, presetFavorites)
+  const presets = orderPresets(
+    loadedPresets.filter((preset) => !removedPresetIds.includes(preset.id)),
+    presetFavorites,
+  )
   const [selected, setSelected] = useState<Preset | null>(null)
   const [collection, setCollection] = useState<IconCollection | null>(null)
   const [mode, setMode] = useState<Mode>("all")
@@ -665,6 +681,15 @@ function IconView({
       aria-label="아이콘 선택"
       aria-busy={loading.busy}
     >
+      <PresetShortcuts
+        presets={presets}
+        presetFavorites={presetFavorites}
+        selected={selected?.id ?? null}
+        visible={visible}
+        choose={(preset) => {
+          void selectPreset(preset)
+        }}
+      />
       <button
         ref={select}
         type="button"
@@ -691,16 +716,13 @@ function IconView({
                 : (selected?.title ?? "프리셋 선택")
           }
         />
+        <ChevronRight
+          class="ruricon-preset-select-arrow"
+          size={20}
+          aria-hidden="true"
+          focusable="false"
+        />
       </button>
-      <PresetShortcuts
-        presets={presets}
-        presetFavorites={presetFavorites}
-        selected={selected?.id ?? null}
-        visible={visible}
-        choose={(preset) => {
-          void selectPreset(preset)
-        }}
-      />
       <div class="ruricon-icon-toolbar">
         <div class="ruricon-icon-tabs">
           {(

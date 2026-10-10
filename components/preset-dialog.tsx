@@ -1,4 +1,4 @@
-import { Check, Star } from "lucide-preact"
+import { Check, Star, X } from "lucide-preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { getCachedImageCount, loadCollection, type Preset } from "../entrypoints/lib/icon-view.ts"
@@ -44,14 +44,19 @@ export function PresetDialog({
   presetFavorites,
   toggleFavorite,
   storageError,
+  removedPresetIds,
+  removePreset,
 }: {
   request: DialogState
   dismiss: () => void
   presetFavorites: number[]
   toggleFavorite: (id: number) => void
   storageError: string | null
+  removedPresetIds: number[]
+  removePreset: (preset: Preset) => Promise<void>
 }) {
   const [query, setQuery] = useState("")
+  const [previewVisible, setPreviewVisible] = useState(false)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [preview, setPreview] = useState<{
     id: number
@@ -60,12 +65,15 @@ export function PresetDialog({
     error: string
   } | null>(null)
   const [retry, setRetry] = useState(0)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
+  const deletePending = useRef(false)
   const modal = useRef<HTMLDialogElement>(null)
   const search = useRef<HTMLInputElement>(null)
   // Keep the opening order until the next dialog request.
-  const presets = request.presets
+  const presets = request.presets.filter((preset) => !removedPresetIds.includes(preset.id))
   const filtered = presets.filter((preset) => matchesPreset(preset.title, query))
-  const selected = request.presets.find((preset) => preset.id === selectedId)
+  const selected = presets.find((preset) => preset.id === selectedId)
   const currentPreview = preview?.id === selectedId ? preview : null
   const articleUrl = (preset: Preset) =>
     getViewUrl(iconBoardId, preset.mainId ?? preset.id, location.hostname === mobileDomain)
@@ -74,6 +82,8 @@ export function PresetDialog({
     if (!request.open) return
     const dialog = modal.current!
     setQuery("")
+    setDeleteError("")
+    setPreviewVisible(false)
     setSelectedId(request.selected ?? presets[0]?.id ?? null)
     request.opener.focus()
     dialog.showModal()
@@ -117,16 +127,53 @@ export function PresetDialog({
     }
   }, [request.open, selected, retry])
 
+  async function deleteSelected() {
+    if (
+      !selected ||
+      deletePending.current ||
+      !window.confirm(`「${selected.title}」를 루리웹 아이콘팩 즐겨찾기에서 삭제하시겠습니까?`)
+    )
+      return
+    deletePending.current = true
+    setDeleting(true)
+    setDeleteError("")
+    try {
+      await removePreset(selected)
+      setSelectedId(presets.find((preset) => preset.id !== selected.id)?.id ?? null)
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "프리셋을 삭제하지 못했습니다.")
+    } finally {
+      deletePending.current = false
+      setDeleting(false)
+    }
+  }
+
   return (
     <dialog
       ref={modal}
       class="ruricon-preset-dialog"
       data-mobile={String(location.hostname === mobileDomain)}
-      aria-label="프리셋 선택"
+      data-preview-visible={String(previewVisible)}
+      aria-labelledby="ruricon-preset-title"
       onClose={() => {
         if (!modal.current?.open) dismiss()
       }}
+      onCancel={(event) => {
+        if (deletePending.current) event.preventDefault()
+      }}
     >
+      <div class="ruricon-preset-heading">
+        <strong id="ruricon-preset-title">프리셋 선택</strong>
+        <button
+          type="button"
+          class="ruricon-preset-close"
+          aria-label="프리셋 선택 닫기"
+          disabled={deleting}
+          onClick={dismiss}
+        >
+          <X size={18} />
+        </button>
+      </div>
       <div class="ruricon-preset-body">
         <section class="ruricon-preset-sidebar" aria-label="내 프리셋">
           <input
@@ -156,6 +203,7 @@ export function PresetDialog({
                     class="ruricon-preset-option"
                     aria-label={`${preset.title} 선택`}
                     aria-pressed={preset.id === selectedId}
+                    disabled={deleting}
                     onClick={() => setSelectedId(preset.id)}
                   >
                     <PresetLabel preset={preset} text="" />
@@ -173,6 +221,7 @@ export function PresetDialog({
                     aria-label={`${preset.title} 프리셋 즐겨찾기`}
                     title="프리셋 즐겨찾기"
                     aria-pressed={presetFavorites.includes(preset.id)}
+                    disabled={deleting}
                     onClick={() => toggleFavorite(preset.id)}
                   >
                     <Star
@@ -191,6 +240,7 @@ export function PresetDialog({
           </div>
         </section>
         <section
+          id="ruricon-preset-detail"
           class="ruricon-preset-detail"
           aria-label="프리셋 아이콘 미리보기"
           aria-busy={Boolean(selected && !currentPreview)}
@@ -239,14 +289,33 @@ export function PresetDialog({
         </section>
       </div>
       <footer class="ruricon-preset-footer">
-        {storageError && <span role="status">{storageError}</span>}
-        <button type="button" class="ruricon-preset-cancel" onClick={dismiss}>
+        <button
+          type="button"
+          class="ruricon-preset-delete"
+          disabled={!selected || deleting}
+          onClick={() => void deleteSelected()}
+        >
+          삭제
+        </button>
+        {(deleteError || storageError) && <span role="status">{deleteError || storageError}</span>}
+        <button type="button" class="ruricon-preset-cancel" disabled={deleting} onClick={dismiss}>
           취소
         </button>
         <button
           type="button"
+          class="ruricon-preset-preview-toggle"
+          disabled={!selected || deleting}
+          aria-controls="ruricon-preset-detail"
+          aria-expanded={previewVisible}
+          onClick={() => setPreviewVisible((current) => !current)}
+        >
+          <span class="ruricon-preset-show-preview">미리보기</span>
+          <span class="ruricon-preset-show-list">목록</span>
+        </button>
+        <button
+          type="button"
           class="ruricon-preset-apply"
-          disabled={!selected}
+          disabled={!selected || deleting}
           onClick={() => {
             if (selected) {
               dismiss()

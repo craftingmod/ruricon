@@ -1,12 +1,18 @@
 import { readMain } from "./editor/articleMeta.ts"
 import { iconBoardId, mobileDomain } from "./ruli-constants.ts"
-import { readArticle, readIconFavorite, readIconImages } from "./ruli-utils.ts"
+import {
+  readArticle,
+  readIconFavorite,
+  readIconImages,
+  removeFavoriteIconSet,
+} from "./ruli-utils.ts"
 
 export type Preset = {
   id: number
   title: string
   mainId: number | null
   imageCount?: number
+  favoriteIds?: number[]
   thumbnail: { type: "image" | "video"; src: string }
 }
 export type IconPage = {
@@ -61,12 +67,34 @@ export function loadPresets() {
       const mainId = match ? (match[1] === "M" ? favorite.iconId : Number(match[2])) : null
       if (mainId !== null && (!Number.isSafeInteger(mainId) || mainId < 1)) continue
       const id = mainId ?? favorite.iconId
+      const existing = presets.get(id)
       if (!presets.has(id) || match?.[1] === "M") {
-        presets.set(id, { id, title: favorite.iconTitle, mainId, thumbnail: favorite.thumbnail })
+        presets.set(id, {
+          id,
+          title: favorite.iconTitle,
+          mainId,
+          thumbnail: favorite.thumbnail,
+          favoriteIds: [...(existing?.favoriteIds ?? []), favorite.iconId],
+        })
+      } else {
+        existing!.favoriteIds!.push(favorite.iconId)
       }
     }
     return [...presets.values()]
   })
+}
+
+export async function removePresetFavorites(preset: Preset) {
+  preset.favoriteIds ??= [preset.id]
+  try {
+    while (preset.favoriteIds.length) {
+      if (!(await removeFavoriteIconSet(preset.favoriteIds[0])))
+        throw new Error("프리셋을 삭제하지 못했습니다. 다시 시도해주세요.")
+      preset.favoriteIds.shift()
+    }
+  } finally {
+    requests.delete("presets")
+  }
 }
 
 export function loadNativePage(id: number, offset: number): Promise<IconPage> {

@@ -6,6 +6,7 @@ import {
   loadCollection,
   loadNativePage,
   loadPresets,
+  removePresetFavorites,
 } from "../entrypoints/lib/icon-view.ts"
 import { getLastId, readIconImages } from "../entrypoints/lib/ruli-utils.ts"
 import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.tsx"
@@ -21,6 +22,11 @@ const nativeSource = (id: number, index: number) => source(id, index).split("?")
 let failSecondPage = true
 let releaseSlow: (() => void) | null = null
 let releaseInsert: (() => void) | null = null
+const removedNativeFavorites = new Set<number>()
+const removalCalls: number[] = []
+let failRemovalId: number | null = 5033
+let releaseRemoval: (() => void) | null = null
+let holdRemoval = false
 const result = document.querySelector<HTMLElement>("#result")!
 const originalFetch = window.fetch
 const originalConfirm = window.confirm
@@ -54,6 +60,19 @@ window.fetch = async (input, options) => {
   requests.push(url.href)
   if (url.hostname === "api.ruliweb.com") {
     assert(options?.credentials === "include", "API includes login cookies")
+    if (url.pathname === "/comment_icon_pick_remove") {
+      assert(options?.method?.toLowerCase() === "post", "Removal uses POST")
+      assert(options.body instanceof URLSearchParams, "Removal sends a form body")
+      const id = Number(options.body.get("num"))
+      removalCalls.push(id)
+      if (holdRemoval)
+        await new Promise<void>((resolve) => {
+          releaseRemoval = resolve
+        })
+      if (id === failRemovalId) return Response.json({ success: false })
+      removedNativeFavorites.add(id)
+      return Response.json({ success: true })
+    }
     const id = Number(url.searchParams.get("id"))
     if (!id) {
       const packs = [
@@ -65,7 +84,7 @@ window.fetch = async (input, options) => {
         [910, "분할만2 (S920)"],
         [940, "Slow"],
         [950, "Broken (M)"],
-      ]
+      ].filter(([id]) => !removedNativeFavorites.has(Number(id)))
       return Response.json({
         success: true,
         html: `<div></div><div><div>${packs.map(([id, title]) => `<div><div class="icon_data_show_target" title="${title}" onclick="app.icon_data_show(this, ${id});"><img src="${source(Number(id), 0)}"></div></div>`).join("")}</div></div>`,
@@ -210,17 +229,68 @@ async function checkPresetDialog(comment: HTMLElement) {
   click(".ruricon-preset-select", comment)
   const modal = document.querySelector<HTMLDialogElement>("dialog")!
   assert(
-    !modal.querySelector(".ruricon-preset-heading") &&
-      modal.getAttribute("aria-label") === "프리셋 선택",
-    "Dialog omits the header while retaining its accessible name",
+    modal.querySelector(".ruricon-preset-heading strong")!.textContent === "프리셋 선택" &&
+      modal.getAttribute("aria-labelledby") === "ruricon-preset-title",
+    "Dialog restores the title and accessible heading",
   )
+  const detail = modal.querySelector<HTMLElement>(".ruricon-preset-detail")!
+  const sidebar = modal.querySelector<HTMLElement>(".ruricon-preset-sidebar")!
+  const previewToggle = modal.querySelector<HTMLButtonElement>(".ruricon-preset-preview-toggle")!
+  const vertical = getComputedStyle(previewToggle).display !== "none"
+  const body = modal.querySelector<HTMLElement>(".ruricon-preset-body")!
+  const footer = modal.querySelector<HTMLElement>(".ruricon-preset-footer")!
+  if (!vertical) {
+    const columns = getComputedStyle(body).gridTemplateColumns.split(" ").map(parseFloat)
+    assert(
+      columns.length === 2 && columns[0] >= 340 && columns[0] <= 420,
+      "Wide layout constrains the list to 340–420px",
+    )
+    assert(
+      Math.abs(columns[1] - (body.clientWidth - columns[0] - 28)) <= 1,
+      "Preview occupies the remaining grid width",
+    )
+  }
   assert(
     [...modal.querySelectorAll(".ruricon-preset-footer button")]
-      .map((button) => button.textContent)
-      .join(",") === "취소,적용" &&
+      .filter((button) => getComputedStyle(button).display !== "none")
+      .map((button) =>
+        [...button.childNodes]
+          .filter(
+            (child) =>
+              !(child instanceof HTMLElement) || getComputedStyle(child).display !== "none",
+          )
+          .map((child) => child.textContent)
+          .join("")
+          .trim(),
+      )
+      .join(",") === (vertical ? "삭제,미리보기,적용" : "삭제,취소,적용") &&
       !modal.textContent!.includes("선택한 프리셋의 아이콘을 표시합니다."),
-    "Footer contains Cancel and Apply without the hint",
+    "CSS selects Preview/Apply for vertical layout and Cancel/Apply for wide layout",
   )
+  assert(
+    getComputedStyle(detail).visibility === (vertical ? "hidden" : "visible"),
+    "Only vertical layout hides the initial preview",
+  )
+  if (vertical) {
+    click(".ruricon-preset-preview-toggle", modal)
+    assert(
+      getComputedStyle(detail).visibility === "visible" &&
+        getComputedStyle(sidebar).visibility === "hidden" &&
+        previewToggle.getAttribute("aria-expanded") === "true",
+      "Preview button shows detail and hides the list through CSS",
+    )
+    assert(
+      modal.querySelector(".ruricon-preset-detail") === detail &&
+        modal.querySelector(".ruricon-preset-sidebar") === sidebar,
+      "Preview toggle retains both DOM sections",
+    )
+    click(".ruricon-preset-preview-toggle", modal)
+    assert(
+      getComputedStyle(detail).visibility === "hidden" &&
+        getComputedStyle(sidebar).visibility === "visible",
+      "List button returns to the existing sidebar",
+    )
+  }
   const countFor = (title: string) =>
     [...modal.querySelectorAll<HTMLElement>(".ruricon-preset-row")]
       .find((row) => row.querySelector(".ruricon-preset-title")!.textContent!.includes(title))!
@@ -236,10 +306,21 @@ async function checkPresetDialog(comment: HTMLElement) {
     "Reading cached card counts makes no extra requests",
   )
   const hangulSearch = modal.querySelector<HTMLInputElement>("input")!
+  const presetList = modal.querySelector<HTMLElement>(".ruricon-preset-list")!
+  const listHeight = presetList.getBoundingClientRect().height
+  assert(
+    listHeight > 0 &&
+      presetList.getBoundingClientRect().bottom <= sidebar.getBoundingClientRect().bottom + 1,
+    "List fills the remaining fixed sidebar height without overflowing",
+  )
   hangulSearch.value = "냥냥"
   void act(() => {
     hangulSearch.dispatchEvent(new Event("input"))
   })
+  assert(
+    presetList.getBoundingClientRect().height === listHeight,
+    "Filtering to one card preserves list height",
+  )
   click(".ruricon-preset-option", modal)
   await waitFor(() => modal.querySelectorAll(".ruricon-preset-preview-grid img").length === 50)
   assert(
@@ -264,29 +345,115 @@ async function checkPresetDialog(comment: HTMLElement) {
     )
   const thumbnail = modal.querySelector<HTMLImageElement>(".ruricon-preset-option img")!
   const previewIcon = modal.querySelector<HTMLImageElement>(".ruricon-preset-preview-grid img")!
+  const thumbnailWidth = thumbnail.getBoundingClientRect().width
+  if (vertical) click(".ruricon-preset-preview-toggle", modal)
+  const previewGrid = modal.querySelector<HTMLElement>(".ruricon-preset-preview-grid")!
+  const previewHeight = previewGrid.getBoundingClientRect().height
+  assert(
+    detail.getBoundingClientRect().height ===
+      modal.querySelector(".ruricon-preset-body")!.getBoundingClientRect().height,
+    "Detail matches the fixed body height",
+  )
+  assert(
+    previewHeight > 0 &&
+      Math.abs(
+        previewGrid.getBoundingClientRect().bottom - detail.getBoundingClientRect().bottom,
+      ) <= 1,
+    "Preview grid fills the remaining detail height",
+  )
+  assert(
+    getComputedStyle(previewGrid).overflowY === "auto",
+    "Preview grid owns its vertical scroll area",
+  )
+  assert(
+    body.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top &&
+      footer.getBoundingClientRect().bottom <= modal.getBoundingClientRect().bottom,
+    "Fixed footer stays below both scroll panels and inside the dialog",
+  )
+  const originalHeight = modal.style.height
+  modal.style.height = "300px"
+  assert(
+    body.clientHeight > 0 &&
+      body.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top &&
+      footer.getBoundingClientRect().bottom <= modal.getBoundingClientRect().bottom,
+    "Short dialog shrinks the panels without overlapping the footer",
+  )
+  modal.style.height = originalHeight
   assert(
     previewIcon.getBoundingClientRect().width >= iconSize,
     "Preview icons use the existing icon size",
   )
   assert(
-    thumbnail.getBoundingClientRect().width === iconSize * 0.8,
+    thumbnailWidth === iconSize * 0.8,
     "Card thumbnails use the existing shortcut preview size",
   )
+  if (vertical) click(".ruricon-preset-preview-toggle", modal)
   modal.style.setProperty("--ruricon-icon-size", "120px")
   modal.style.setProperty("--ruricon-preset-shortcut-size", "60px")
+  const resizedThumbnailWidth = thumbnail.getBoundingClientRect().width
+  if (vertical) click(".ruricon-preset-preview-toggle", modal)
   assert(
-    previewIcon.getBoundingClientRect().width >= 120 &&
-      thumbnail.getBoundingClientRect().width === 60,
+    previewIcon.getBoundingClientRect().width >= 120 && resizedThumbnailWidth === 60,
     "Both existing CSS size variables control the dialog",
+  )
+  assert(
+    previewGrid.scrollHeight > previewGrid.clientHeight,
+    "Larger icons overflow inside the fixed preview viewport",
   )
   modal.style.removeProperty("--ruricon-icon-size")
   modal.style.removeProperty("--ruricon-preset-shortcut-size")
+  assert(
+    previewGrid.getBoundingClientRect().height === previewHeight,
+    "Changing icon size keeps the preview viewport height",
+  )
+  if (vertical) click(".ruricon-preset-preview-toggle", modal)
+  const name = modal.querySelector<HTMLElement>(".ruricon-preset-title")!
+  const originalName = name.textContent
+  name.textContent = "매우 긴 프리셋 이름 ".repeat(30)
+  assert(
+    getComputedStyle(name).webkitLineClamp === "2" &&
+      name.scrollHeight > name.clientHeight &&
+      name.getBoundingClientRect().height <= parseFloat(getComputedStyle(name).lineHeight) * 2 + 1,
+    "Long preset names clamp to two lines",
+  )
+  assert(
+    name.nextElementSibling!.getBoundingClientRect().top >= name.getBoundingClientRect().bottom,
+    "Icon count remains below the clamped name",
+  )
+  name.textContent = originalName
   hangulSearch.value = "Slow"
   void act(() => {
     hangulSearch.dispatchEvent(new Event("input"))
   })
   click(".ruricon-preset-title", modal)
   await waitFor(() => releaseSlow !== null)
+  if (!vertical) {
+    const requestCount = requests.length
+    modal.style.width = "969px"
+    await waitFor(() => getComputedStyle(detail).visibility === "hidden")
+    assert(
+      innerWidth > 1200 && getComputedStyle(previewToggle).display !== "none",
+      "Container width triggers a single panel even on a wide screen",
+    )
+    click(".ruricon-preset-preview-toggle", modal)
+    assert(
+      detail.getAttribute("aria-busy") === "true" &&
+        modal.querySelector(".ruricon-preset-status")!.textContent!.includes("불러오는 중"),
+      "Pending preview remains loading across panel changes",
+    )
+    modal.style.width = "970px"
+    await waitFor(
+      () =>
+        getComputedStyle(sidebar).visibility === "visible" &&
+        getComputedStyle(previewToggle).display === "none",
+    )
+    assert(
+      hangulSearch.value === "Slow" && requests.length === requestCount,
+      "Container transition preserves search and the in-flight request",
+    )
+    modal.style.removeProperty("width")
+    click(".ruricon-preset-preview-toggle", modal)
+  }
   hangulSearch.value = "Native"
   void act(() => {
     hangulSearch.dispatchEvent(new Event("input"))
@@ -350,6 +517,33 @@ async function checkPresetDialog(comment: HTMLElement) {
   list.scrollTop = 60
   const scrollBeforeFavorite = list.scrollTop
   assert(scrollBeforeFavorite > 0, "Favorite scroll check uses a scrollable list")
+  if (!vertical) {
+    modal.style.width = "969px"
+    await waitFor(() => getComputedStyle(previewToggle).display !== "none")
+  }
+  click(".ruricon-preset-preview-toggle", modal)
+  previewGrid.scrollTop = 80
+  const previewScroll = previewGrid.scrollTop
+  assert(previewScroll > 0, "Preview preservation check uses a scrollable panel")
+  click(".ruricon-preset-preview-toggle", modal)
+  assert(
+    list.scrollTop === scrollBeforeFavorite,
+    "Returning to the list preserves its independent scroll",
+  )
+  click(".ruricon-preset-preview-toggle", modal)
+  assert(
+    previewGrid.scrollTop === previewScroll,
+    "Returning to preview preserves its independent scroll",
+  )
+  click(".ruricon-preset-preview-toggle", modal)
+  if (!vertical) {
+    modal.style.removeProperty("width")
+    await waitFor(() => getComputedStyle(previewToggle).display === "none")
+    assert(
+      list.scrollTop === scrollBeforeFavorite,
+      "Returning to two columns preserves list scroll",
+    )
+  }
   const cardTopBeforeFavorite = nativeFavoriteRow.getBoundingClientRect().top
   click(".ruricon-preset-favorite", nativeFavoriteRow)
   await tick()
@@ -434,7 +628,8 @@ async function checkPresetDialog(comment: HTMLElement) {
     localStorage.getItem("ruricon:icon-view:v1") === iconPreferences,
     "Repeated preset toggles never write icon preferences",
   )
-  click(".ruricon-preset-cancel", modal)
+  if (vertical) click(".ruricon-preset-preview-toggle", modal)
+  click(".ruricon-preset-heading button", modal)
   await tick()
   assert(
     document.activeElement === comment.querySelector(".ruricon-preset-select"),
@@ -446,6 +641,10 @@ async function checkPresetDialog(comment: HTMLElement) {
   )
   click(".ruricon-preset-select", comment)
   await tick()
+  assert(
+    getComputedStyle(detail).visibility === (vertical ? "hidden" : "visible"),
+    "Reopening resets the vertical layout to the list",
+  )
   assert(
     modal.querySelector(".ruricon-preset-title")!.textContent === "Native",
     "Reopening keeps preset favorites first",
@@ -476,6 +675,108 @@ async function checkPresetDialog(comment: HTMLElement) {
   assert(
     comment.querySelector(".ruricon-preset-select")!.textContent!.includes("Native"),
     "Default selection follows preset favorites when the last selection is missing",
+  )
+  click(".ruricon-preset-select", comment)
+  await tick()
+  const deletionDialog = document.querySelector<HTMLDialogElement>("dialog")!
+  assert(
+    !deletionDialog.querySelector(".ruricon-preset-heading .ruricon-preset-delete"),
+    "Delete appears only in the footer",
+  )
+  const deleteButton = deletionDialog.querySelector<HTMLButtonElement>(".ruricon-preset-delete")!
+  const footerButtons = [
+    ...deletionDialog.querySelectorAll<HTMLButtonElement>(".ruricon-preset-footer button"),
+  ].filter((button) => getComputedStyle(button).display !== "none")
+  assert(
+    deleteButton.getBoundingClientRect().left < footerButtons.at(-1)!.getBoundingClientRect().left,
+    "Footer delete stays on the left of Apply",
+  )
+  const beforeRemovalPreferences = localStorage.getItem("ruricon:icon-view:v1")
+  confirmDeletion = false
+  click(".ruricon-preset-delete", deletionDialog)
+  assert(removalCalls.length === 0, "Canceled removal sends no request")
+  confirmDeletion = true
+  click(".ruricon-preset-delete", deletionDialog)
+  await waitFor(
+    () =>
+      deletionDialog
+        .querySelector(".ruricon-preset-footer [role='status']")
+        ?.textContent?.includes("삭제하지 못했습니다") === true,
+  )
+  assert(
+    deletionDialog.querySelector(".ruricon-preset-title")!.textContent === "Native",
+    "Failed removal keeps the preset in the list",
+  )
+  failRemovalId = null
+  holdRemoval = true
+  click(".ruricon-preset-delete", deletionDialog)
+  await waitFor(() => releaseRemoval !== null)
+  const pendingRemovalCalls = removalCalls.length
+  click(".ruricon-preset-delete", deletionDialog)
+  assert(
+    deleteButton.disabled &&
+      removalCalls.length === pendingRemovalCalls &&
+      deletionDialog.querySelector<HTMLButtonElement>(".ruricon-preset-close")!.disabled,
+    "Pending deletion prevents duplicate requests and closing",
+  )
+  const cancel = new Event("cancel", { cancelable: true })
+  deletionDialog.dispatchEvent(cancel)
+  assert(cancel.defaultPrevented, "Escape cannot close the dialog during deletion")
+  holdRemoval = false
+  releaseRemoval!()
+  await waitFor(
+    () =>
+      !deleteButton.disabled &&
+      ![...deletionDialog.querySelectorAll(".ruricon-preset-title")].some(
+        (title) => title.textContent === "Native",
+      ),
+  )
+  assert(
+    !comment.querySelector('[data-preset-id="5033"]'),
+    "Successful deletion also removes the Picker shortcut",
+  )
+  assert(
+    localStorage.getItem("ruricon:icon-view:v1") === beforeRemovalPreferences,
+    "Deleting a preset leaves icon favorites and history untouched",
+  )
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:preset-favorites:v1")!).length === 0,
+    "Deleted preset is removed from local preset favorites",
+  )
+  failRemovalId = 901
+  click(".ruricon-preset-delete", deletionDialog)
+  await waitFor(
+    () =>
+      deletionDialog
+        .querySelector(".ruricon-preset-footer [role='status']")
+        ?.textContent?.includes("삭제하지 못했습니다") === true,
+  )
+  assert(
+    removalCalls.slice(-2).join(",") === "900,901",
+    "Master removal uses its actual Main and Segment favorite IDs",
+  )
+  failRemovalId = null
+  click(".ruricon-preset-delete", deletionDialog)
+  await waitFor(
+    () =>
+      !deleteButton.disabled &&
+      ![...deletionDialog.querySelectorAll(".ruricon-preset-title")].some((title) =>
+        title.textContent!.includes("냥냥"),
+      ),
+  )
+  assert(
+    removalCalls.slice(-3).join(",") === "900,901,901",
+    "Retry skips IDs already removed by a partially successful operation",
+  )
+  const slaveOnly = (await loadPresets()).find((preset) => preset.id === 920)!
+  await removePresetFavorites(slaveOnly)
+  assert(
+    removalCalls.at(-1) === 910,
+    "Slave-only preset removes the actual favorite ID rather than the derived Main ID",
+  )
+  assert(
+    !(await loadPresets()).some((preset) => [5033, 900, 920].includes(preset.id)),
+    "Deletion invalidates cached presets and subsequent reads reflect server removals",
   )
   void act(unmount)
 }

@@ -1,5 +1,5 @@
 import { articlePostDelayMs } from "./constants.ts"
-import { getEditUrl, getIconImagesUrl, getViewUrl, iconListUrl } from "./ruli-constants.ts"
+import { getEditUrl, getIconImagesUrl, getViewUrl, iconListUrl, removeFavorIconUrl } from "./ruli-constants.ts"
 
 export interface Article {
   board_id: number
@@ -346,4 +346,28 @@ export async function readIconImages(iconId: number, offset = 0, limit = 100) {
     realIconId,
     icons: iconSrc,
   }
+}
+
+export async function removeFavoriteIconSet(iconId: number) {
+  
+  if (iconId === 3213 || iconId === 1917) {
+    throw new Error("광고 용도로 고정된 아이콘은 삭제가 불가능합니다.")
+  }
+
+  const body = new URLSearchParams({
+    num: String(iconId)
+  })
+
+  const rawRequest = await fetch(removeFavorIconUrl, {
+    method: "post",
+    mode: "cors",
+    credentials: "include",
+    body,
+  })
+  if (rawRequest.status !== 200) {
+    return false
+  }
+  const json = (await rawRequest.json()) as { success?: boolean }
+
+  return Boolean(json?.success ?? false)
 }
