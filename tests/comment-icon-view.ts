@@ -722,6 +722,10 @@ async function checkPresetDialog(comment: HTMLElement) {
   const cancel = new Event("cancel", { cancelable: true })
   deletionDialog.dispatchEvent(cancel)
   assert(cancel.defaultPrevented, "Escape cannot close the dialog during deletion")
+  void act(() => {
+    deletionDialog.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 0, clientY: 0 }))
+  })
+  assert(deletionDialog.open, "Backdrop cannot cancel pending deletion")
   holdRemoval = false
   releaseRemoval!()
   await waitFor(
@@ -819,7 +823,80 @@ async function checkInitialShortcutPage() {
     void act(unmount)
   }
 }
+async function checkModalScrollLock() {
+  const comment = document.querySelector<HTMLElement>("#comment")!
+  const spacer = document.createElement("div")
+  spacer.style.height = "200vh"
+  document.body.append(spacer)
+  const roots = [document.documentElement, document.body]
+  const previousStyles = roots.map((root) => root.style.cssText)
+  const previousOverflow = roots.map((root) => getComputedStyle(root).overflow)
+  click("button[onclick]", comment)
+  await tick()
+  for (const closeMethod of ["button", "backdrop", "native", "unmount"]) {
+    click(".ruricon-preset-select", comment)
+    await tick()
+    const dialog = document.querySelector<HTMLDialogElement>("dialog")!
+    assert(
+      dialog.matches(":modal") &&
+        roots.every((root) => getComputedStyle(root).overflow === "hidden"),
+      "Open modal locks background document scrolling",
+    )
+    const list = dialog.querySelector<HTMLElement>(".ruricon-preset-list")!
+    list.scrollTop = 50
+    assert(
+      getComputedStyle(list).overflowY === "auto" && list.scrollTop > 0,
+      "Modal list remains scrollable",
+    )
+    if (closeMethod === "backdrop") {
+      const bounds = dialog.getBoundingClientRect()
+      void act(() => {
+        dialog.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            clientX: bounds.left + 2,
+            clientY: bounds.top + 2,
+          }),
+        )
+      })
+      assert(dialog.open, "Clicking dialog padding does not cancel")
+      click("input", dialog)
+      assert(dialog.open, "Clicks inside the dialog do not cancel")
+      const savedBeforeBackdrop = localStorage.getItem("ruricon:icon-view:v1")
+      const presetBeforeBackdrop = comment.querySelector(".ruricon-preset-select")!.textContent
+      click(".ruricon-preset-row:last-child .ruricon-preset-option", dialog)
+      void act(() => {
+        dialog.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 0, clientY: 0 }))
+      })
+      assert(
+        !dialog.open &&
+          localStorage.getItem("ruricon:icon-view:v1") === savedBeforeBackdrop &&
+          comment.querySelector(".ruricon-preset-select")!.textContent === presetBeforeBackdrop,
+        "Backdrop click cancels without applying the pending selection",
+      )
+    } else if (closeMethod === "button") click(".ruricon-preset-cancel", dialog)
+    else if (closeMethod === "native") void act(() => dialog.close())
+    else void act(cleanup)
+    await tick()
+    assert(
+      roots.every(
+        (root, index) =>
+          getComputedStyle(root).overflow === previousOverflow[index] &&
+          root.style.cssText === previousStyles[index],
+      ),
+      "Button close, native close and unmount restore original document styles",
+    )
+  }
+  spacer.remove()
+}
 async function check() {
+  if (location.search === "?modal-scroll-lock") {
+    await checkModalScrollLock()
+    result.textContent =
+      "PASS: modal background scroll lock, internal scrolling and cleanup on button/native close/unmount"
+    result.dataset.result = "PASS"
+    return
+  }
   if (location.search === "?initial-shortcut-page") {
     void act(cleanup)
     await checkInitialShortcutPage()

@@ -155,6 +155,17 @@ export function PresetDialog({
       data-mobile={String(location.hostname === mobileDomain)}
       data-preview-visible={String(previewVisible)}
       aria-labelledby="ruricon-preset-title"
+      onClick={(event) => {
+        if (event.target !== event.currentTarget || deletePending.current) return
+        const bounds = event.currentTarget.getBoundingClientRect()
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        )
+          dismiss()
+      }}
       onClose={() => {
         if (!modal.current?.open) dismiss()
       }}

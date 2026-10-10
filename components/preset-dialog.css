@@ -1,3 +1,7 @@
+html:has(.ruricon-preset-dialog:modal),
+body:has(.ruricon-preset-dialog:modal) {
+  overflow: hidden;
+}
 .ruricon-preset-dialog {
   box-sizing: border-box;
   width: min(1600px, calc(100vw - 24px));
