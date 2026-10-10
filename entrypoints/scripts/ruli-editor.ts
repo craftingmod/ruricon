@@ -1,6 +1,6 @@
 import { contentSample } from "../lib/constants.ts"
 import { iconBoardId } from "../lib/ruli-constants.ts"
-import { createArticle, parseArticleURL, writeArticle } from "../lib/ruli-utils.ts"
+import { createArticle, writeArticle } from "../lib/ruli-utils.ts"
 import { mountIconUpload } from "./icon-upload.ts"
 
 export async function main() {
@@ -20,7 +20,7 @@ export async function main() {
     const writeResult = await writeArticle(article)
     if (writeResult.success) {
       console.log(writeResult)
-      const articleId = parseArticleURL(writeResult.url)
+      // const articleId = parseArticleURL(writeResult.url)
     }
   })
   return cleanup

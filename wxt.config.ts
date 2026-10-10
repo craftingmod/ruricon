@@ -15,9 +15,7 @@ export default defineConfig({
       chrome: chromeExec, // Use Chrome Beta instead of regular Chrome
     },
     chromiumArgs: ["--remote-debugging-port=8327"],
-    startUrls: [
-      editorPages[0],
-    ],
+    startUrls: [editorPages[0]],
     chromiumProfile: resolve(".chrome"),
     keepProfileChanges: true,
     chromiumPort: 8327,
