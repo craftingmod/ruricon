@@ -1,5 +1,8 @@
-.ruricon-icon-view {
+.ruricon-icon-view,
+.ruricon-preset-dialog {
   --ruricon-icon-size: 100px;
+}
+.ruricon-icon-view {
   container-type: inline-size;
   box-sizing: border-box;
   padding: 0 12px 12px;
@@ -9,7 +12,8 @@
   color: CanvasText;
   font: 14px/1.5 sans-serif;
 }
-.ruricon-icon-view[data-mobile="true"] {
+.ruricon-icon-view[data-mobile="true"],
+.ruricon-preset-dialog[data-mobile="true"] {
   --ruricon-icon-size: 70px;
 }
 .ruricon-icon-view button,
@@ -50,8 +54,7 @@
   padding: 8px 12px;
   text-align: left;
 }
-.ruricon-icon-tabs,
-.ruricon-preset-heading {
+.ruricon-icon-tabs {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -111,8 +114,11 @@
 .ruricon-icon-view[data-edit-mode="false"] .ruricon-icon-star {
   display: none;
 }
-.ruricon-preset-shortcuts {
+.ruricon-preset-shortcuts,
+.ruricon-preset-dialog {
   --ruricon-preset-shortcut-size: calc(var(--ruricon-icon-size) * 0.8);
+}
+.ruricon-preset-shortcuts {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -152,6 +158,10 @@
   height: var(--ruricon-preset-shortcut-size);
   object-fit: contain;
   margin: 0;
+}
+.ruricon-icon-view .ruricon-preset-shortcut[data-favorite="true"] {
+  background: #e9a32318;
+  border-color: #e9a32388;
 }
 .ruricon-preset-shortcut .ruricon-preset-label {
   position: absolute;
@@ -303,44 +313,7 @@
   display: block;
   margin: auto;
 }
-.ruricon-preset-dialog {
-  box-sizing: border-box;
-  width: min(420px, calc(100vw - 24px));
-  max-height: 80dvh;
-  padding: 16px;
-  border: 1px solid #aaa;
-  border-radius: 12px;
-  background: Canvas;
-  color: CanvasText;
-  font: 14px/1.5 sans-serif;
-}
-.ruricon-preset-dialog::backdrop {
-  background: #0006;
-}
-.ruricon-preset-heading {
-  justify-content: space-between;
-}
-.ruricon-preset-dialog input {
-  width: 100%;
-  padding: 10px;
-  margin: 12px 0;
-}
-.ruricon-preset-list {
-  max-height: 50dvh;
-  overflow-y: auto;
-}
-.ruricon-preset-list button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 56px;
-  padding: 10px;
-  text-align: left;
-  margin-bottom: 6px;
-}
-.ruricon-preset-select .ruricon-preset-thumbnail,
-.ruricon-preset-list .ruricon-preset-thumbnail {
+.ruricon-preset-select .ruricon-preset-thumbnail {
   width: 48px;
   height: 48px;
   flex: 0 0 48px;

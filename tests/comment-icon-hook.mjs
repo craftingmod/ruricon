@@ -7,7 +7,7 @@ import { join, resolve, relative } from "node:path"
 import { chromeExec } from "../entrypoints/lib/constants.ts"
 
 const port = 5187
-const url = `http://127.0.0.1:${port}/tests/comment-icon-view.html`
+const url = `http://127.0.0.1:${port}/tests/comment-icon-view.html${process.argv.includes("--preset-dialog") ? "?preset-dialog" : ""}`
 const server = spawn(
   process.execPath,
   ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
@@ -43,6 +43,9 @@ try {
       [
         "--headless",
         "--disable-gpu",
+        ...(process.argv.includes("--preset-dialog")
+          ? [`--window-size=${testUrl.includes("m.ruliweb.com") ? "390,844" : "1800,900"}`]
+          : []),
         "--no-first-run",
         "--no-default-browser-check",
         "--no-proxy-server",

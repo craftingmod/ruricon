@@ -28,6 +28,7 @@ import {
   loadCollection,
   loadNativePage,
   loadPresets,
+  orderPresets,
   type IconCollection,
   type Preset,
 } from "../lib/icon-view.ts"
@@ -46,6 +47,7 @@ type Saved = {
 type UpdateSaved = (update: (current: Saved) => Saved) => void
 type AppHandle = { open: (container: HTMLElement) => void }
 const storageKey = "ruricon:icon-view:v1"
+const presetFavoritesKey = "ruricon:preset-favorites:v1"
 const localIconLimit = 1000
 const appRef = createRef<AppHandle>()
 const ownedContainers = new Set<HTMLElement>()
@@ -70,16 +72,39 @@ function readPreferences(): Saved {
         typeof value?.prioritizeRecent === "boolean" ? value.prioritizeRecent : true,
     }
   } catch {
-    return { presetId: null, favorites: [], recent: [], editMode: false, prioritizeRecent: true }
+    return {
+      presetId: null,
+      favorites: [],
+      recent: [],
+      editMode: false,
+      prioritizeRecent: true,
+    }
+  }
+}
+
+function readPresetFavorites(): number[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(presetFavoritesKey) ?? "null")
+    return Array.isArray(value)
+      ? [
+          ...new Set<number>(
+            value.filter((id: unknown) => Number.isSafeInteger(id) && Number(id) > 0),
+          ),
+        ]
+      : []
+  } catch {
+    return []
   }
 }
 
 function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   const [views, setViews] = useState<{ container: HTMLElement; visible: boolean }[]>([])
   const [saved, setSaved] = useState(readPreferences)
+  const [presetFavorites, setPresetFavorites] = useState(readPresetFavorites)
   const [storageError, setStorageError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const persisted = useRef(saved)
+  const persistedPresetFavorites = useRef(presetFavorites)
 
   useImperativeHandle(
     ref,
@@ -98,15 +123,21 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   )
 
   useLayoutEffect(() => {
-    if (persisted.current === saved) return
-    persisted.current = saved
+    if (persisted.current === saved && persistedPresetFavorites.current === presetFavorites) return
     try {
-      localStorage.setItem(storageKey, JSON.stringify(saved))
+      if (persisted.current !== saved) {
+        persisted.current = saved
+        localStorage.setItem(storageKey, JSON.stringify(saved))
+      }
+      if (persistedPresetFavorites.current !== presetFavorites) {
+        persistedPresetFavorites.current = presetFavorites
+        localStorage.setItem(presetFavoritesKey, JSON.stringify(presetFavorites))
+      }
       setStorageError(null)
     } catch {
       setStorageError("사용 기록을 저장할 수 없습니다. 현재 화면에서는 유지됩니다.")
     }
-  }, [saved])
+  }, [saved, presetFavorites])
 
   return (
     <>
@@ -115,6 +146,7 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
           key={index}
           {...view}
           saved={saved}
+          presetFavorites={presetFavorites}
           updateSaved={setSaved}
           storageError={storageError}
           choosePreset={(request) => setDialog({ ...request, open: true })}
@@ -123,6 +155,15 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
       {dialog && (
         <PresetDialog
           request={dialog}
+          presetFavorites={presetFavorites}
+          toggleFavorite={(id) =>
+            setPresetFavorites((current) =>
+              current.includes(id)
+                ? current.filter((favoriteId) => favoriteId !== id)
+                : [...current, id],
+            )
+          }
+          storageError={storageError}
           dismiss={() =>
             setDialog((current) =>
               current === dialog && current.open ? { ...current, open: false } : current,
@@ -136,11 +177,13 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
 
 function PresetShortcuts({
   presets,
+  presetFavorites,
   selected,
   visible,
   choose,
 }: {
   presets: Preset[]
+  presetFavorites: number[]
   selected: number | null
   visible: boolean
   choose: (preset: Preset) => void
@@ -227,6 +270,7 @@ function PresetShortcuts({
             type="button"
             class="ruricon-preset-shortcut"
             data-preset-id={preset.id}
+            data-favorite={String(presetFavorites.includes(preset.id))}
             title={preset.title}
             aria-label={preset.title}
             aria-pressed={preset.id === selected}
@@ -335,6 +379,7 @@ function IconView({
   container,
   visible,
   saved,
+  presetFavorites,
   updateSaved,
   storageError,
   choosePreset,
@@ -342,11 +387,13 @@ function IconView({
   container: HTMLElement
   visible: boolean
   saved: Saved
+  presetFavorites: number[]
   updateSaved: UpdateSaved
   storageError: string | null
   choosePreset: (request: DialogRequest) => void
 }) {
-  const [presets, setPresets] = useState<Preset[]>([])
+  const [loadedPresets, setPresets] = useState<Preset[]>([])
+  const presets = orderPresets(loadedPresets, presetFavorites)
   const [selected, setSelected] = useState<Preset | null>(null)
   const [collection, setCollection] = useState<IconCollection | null>(null)
   const [mode, setMode] = useState<Mode>("all")
@@ -513,7 +560,9 @@ function IconView({
       (result) => {
         setPresets(result)
         setReady(true)
-        initial = result.find((preset) => preset.id === saved.presetId) ?? result[0]
+        initial =
+          result.find((preset) => preset.id === saved.presetId) ??
+          orderPresets(result, presetFavorites)[0]
       },
       initialize,
     )
@@ -645,6 +694,7 @@ function IconView({
       </button>
       <PresetShortcuts
         presets={presets}
+        presetFavorites={presetFavorites}
         selected={selected?.id ?? null}
         visible={visible}
         choose={(preset) => {

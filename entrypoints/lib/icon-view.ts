@@ -17,17 +17,39 @@ export type IconPage = {
 }
 export type IconCollection = { title: string; pages: IconPage[]; nativeId: number | null }
 
-const requests = new Map<string, { expires: number; promise: Promise<unknown> }>()
+export function orderPresets(presets: Preset[], favorites: number[]) {
+  const favoriteIds = new Set(favorites)
+  return [...presets].sort((a, b) => Number(favoriteIds.has(b.id)) - Number(favoriteIds.has(a.id)))
+}
+
+const requests = new Map<string, { expires: number; promise: Promise<unknown>; value?: unknown }>()
 
 function cached<T>(key: string, request: () => Promise<T>): Promise<T> {
   const existing = requests.get(key)
   if (existing && existing.expires > Date.now()) return existing.promise as Promise<T>
-  const promise = request().catch((error) => {
-    if (requests.get(key)?.promise === promise) requests.delete(key)
-    throw error
-  })
+  const promise = request()
+    .then((value) => {
+      const entry = requests.get(key)
+      if (entry?.promise === promise) entry.value = value
+      return value
+    })
+    .catch((error) => {
+      if (requests.get(key)?.promise === promise) requests.delete(key)
+      throw error
+    })
   requests.set(key, { expires: Date.now() + 60_000, promise })
   return promise
+}
+
+function cachedValue<T>(key: string): T | undefined {
+  const entry = requests.get(key)
+  return entry && entry.expires > Date.now() ? (entry.value as T | undefined) : undefined
+}
+
+export function getCachedImageCount(preset: Preset): number | undefined {
+  const collection = cachedValue<IconCollection>(`collection:${preset.id}`)
+  if (collection) return collection.pages[0]?.total ?? 0
+  return preset.mainId === null ? cachedValue<IconPage>(`native:${preset.id}:0`)?.total : undefined
 }
 
 export function loadPresets() {

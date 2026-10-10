@@ -1,7 +1,12 @@
 import { act } from "preact/test-utils"
 
 import { compileMain } from "../entrypoints/lib/editor/articleMeta.ts"
-import { loadCollection, loadNativePage, loadPresets } from "../entrypoints/lib/icon-view.ts"
+import {
+  getCachedImageCount,
+  loadCollection,
+  loadNativePage,
+  loadPresets,
+} from "../entrypoints/lib/icon-view.ts"
 import { getLastId, readIconImages } from "../entrypoints/lib/ruli-utils.ts"
 import { mountCommentIconHook } from "../entrypoints/scripts/comment-icon.tsx"
 
@@ -146,6 +151,7 @@ window.fetch = async (input, options) => {
   )
 }
 localStorage.removeItem("ruricon:icon-view:v1")
+localStorage.removeItem("ruricon:preset-favorites:v1")
 const cleanup = mountCommentIconHook()
 const tick = async () => {
   for (let index = 0; index < 12; index++) await new Promise((resolve) => setTimeout(resolve, 0))
@@ -168,7 +174,8 @@ async function choose(name: string, parent: ParentNode = document.querySelector(
   void act(() => {
     search.dispatchEvent(new Event("input"))
   })
-  click("dialog .ruricon-preset-list button")
+  click("dialog .ruricon-preset-option")
+  click("dialog .ruricon-preset-apply")
   await tick()
 }
 function enableEditMode(parent: ParentNode) {
@@ -176,6 +183,301 @@ function enableEditMode(parent: ParentNode) {
   if (parent.querySelector(".ruricon-icon-edit-mode")!.getAttribute("aria-pressed") !== "true")
     click(".ruricon-icon-edit-mode", parent)
   click(".ruricon-icon-tabs button:first-child", parent)
+}
+async function checkPresetDialog(comment: HTMLElement) {
+  const presets = await loadPresets()
+  const native = presets.find((preset) => preset.id === 5033)!
+  const master = presets.find((preset) => preset.id === 920)!
+  const uncached = presets.find((preset) => preset.id === 940)!
+  await loadNativePage(native.id, 0)
+  await loadCollection(master)
+  const beforeCachedCounts = requests.length
+  assert(
+    getCachedImageCount(native) === 205 && getCachedImageCount(master) === 97,
+    "Counts are available from native page and Master collection caches",
+  )
+  assert(getCachedImageCount(uncached) === undefined, "Missing cache has no count")
+  const originalNow = Date.now
+  try {
+    Date.now = () => originalNow() + 60_001
+    assert(
+      getCachedImageCount(native) === undefined && getCachedImageCount(master) === undefined,
+      "Expired caches do not provide counts",
+    )
+  } finally {
+    Date.now = originalNow
+  }
+  click(".ruricon-preset-select", comment)
+  const modal = document.querySelector<HTMLDialogElement>("dialog")!
+  assert(
+    !modal.querySelector(".ruricon-preset-heading") &&
+      modal.getAttribute("aria-label") === "프리셋 선택",
+    "Dialog omits the header while retaining its accessible name",
+  )
+  assert(
+    [...modal.querySelectorAll(".ruricon-preset-footer button")]
+      .map((button) => button.textContent)
+      .join(",") === "취소,적용" &&
+      !modal.textContent!.includes("선택한 프리셋의 아이콘을 표시합니다."),
+    "Footer contains Cancel and Apply without the hint",
+  )
+  const countFor = (title: string) =>
+    [...modal.querySelectorAll<HTMLElement>(".ruricon-preset-row")]
+      .find((row) => row.querySelector(".ruricon-preset-title")!.textContent!.includes(title))!
+      .querySelector(".ruricon-preset-count")!.textContent
+  assert(
+    countFor("Native") === "205개" && countFor("분할만") === "97개",
+    "Unselected cards display existing cached counts without clicking",
+  )
+  assert(countFor("Slow") === "", "Uncached cards leave the count blank")
+  await tick()
+  assert(
+    requests.length === beforeCachedCounts,
+    "Reading cached card counts makes no extra requests",
+  )
+  const hangulSearch = modal.querySelector<HTMLInputElement>("input")!
+  hangulSearch.value = "냥냥"
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  click(".ruricon-preset-option", modal)
+  await waitFor(() => modal.querySelectorAll(".ruricon-preset-preview-grid img").length === 50)
+  assert(
+    [...modal.querySelectorAll<HTMLImageElement>(".ruricon-preset-preview-grid img")].every(
+      (image, index) => image.src === source(901, index),
+    ),
+    "Master preview uses only Segment 1's first 50 icons",
+  )
+  const titleLink = modal.querySelector<HTMLAnchorElement>(".ruricon-preset-detail h2 a")!
+  assert(
+    titleLink.href.endsWith("/community/board/98/read/900") && titleLink.target === "_blank",
+    "Title links to the actual preset article",
+  )
+  assert(!modal.textContent!.includes("아이콘 편집"), "Preset dialog has no icon editing action")
+  assert(modal.getBoundingClientRect().width <= innerWidth, "Dialog fits the viewport")
+  assert(!modal.querySelector(".ruricon-preset-list a"), "List titles are plain text")
+  assert(modal.getBoundingClientRect().width <= 1600, "Dialog width is capped at 1600px")
+  if (innerWidth > 1624)
+    assert(
+      modal.getBoundingClientRect().width === 1600,
+      "Wide viewport uses the 1600px dialog width",
+    )
+  const thumbnail = modal.querySelector<HTMLImageElement>(".ruricon-preset-option img")!
+  const previewIcon = modal.querySelector<HTMLImageElement>(".ruricon-preset-preview-grid img")!
+  assert(
+    previewIcon.getBoundingClientRect().width >= iconSize,
+    "Preview icons use the existing icon size",
+  )
+  assert(
+    thumbnail.getBoundingClientRect().width === iconSize * 0.8,
+    "Card thumbnails use the existing shortcut preview size",
+  )
+  modal.style.setProperty("--ruricon-icon-size", "120px")
+  modal.style.setProperty("--ruricon-preset-shortcut-size", "60px")
+  assert(
+    previewIcon.getBoundingClientRect().width >= 120 &&
+      thumbnail.getBoundingClientRect().width === 60,
+    "Both existing CSS size variables control the dialog",
+  )
+  modal.style.removeProperty("--ruricon-icon-size")
+  modal.style.removeProperty("--ruricon-preset-shortcut-size")
+  hangulSearch.value = "Slow"
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  click(".ruricon-preset-title", modal)
+  await waitFor(() => releaseSlow !== null)
+  hangulSearch.value = "Native"
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  click(".ruricon-preset-option", modal)
+  await waitFor(
+    () =>
+      modal.querySelectorAll(".ruricon-preset-preview-grid img, .ruricon-preset-preview-grid video")
+        .length === 50 &&
+      modal.querySelector(".ruricon-preset-detail h2")!.textContent!.includes("Native"),
+  )
+  assert(
+    modal.querySelector<HTMLVideoElement>(".ruricon-preset-preview-grid video")?.src ===
+      source(5033, 1),
+    "Native preview preserves video and limits the first page to 50",
+  )
+  releaseSlow!()
+  await tick()
+  assert(
+    modal.querySelectorAll(".ruricon-preset-preview-grid img, .ruricon-preset-preview-grid video")
+      .length === 50,
+    "Late response does not replace the selected preview",
+  )
+  hangulSearch.value = "Broken"
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  click(".ruricon-preset-option", modal)
+  await waitFor(() => Boolean(modal.querySelector(".ruricon-preset-detail button")))
+  assert(
+    modal.querySelector(".ruricon-preset-status")!.textContent!.includes("metadata"),
+    "Preview failure is visible",
+  )
+  const beforeRetry = requests.length
+  click(".ruricon-preset-detail button", modal)
+  await waitFor(
+    () =>
+      requests.length > beforeRetry &&
+      Boolean(modal.querySelector(".ruricon-preset-detail button")),
+  )
+  hangulSearch.value = "Native"
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  click(".ruricon-preset-option", modal)
+  await waitFor(
+    () =>
+      modal.querySelectorAll(".ruricon-preset-preview-grid img, .ruricon-preset-preview-grid video")
+        .length === 50,
+  )
+  const iconPreferences = localStorage.getItem("ruricon:icon-view:v1")
+  hangulSearch.value = ""
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  const openingRows = [...modal.querySelectorAll<HTMLElement>(".ruricon-preset-row")]
+  const nativeFavoriteRow = openingRows.find(
+    (row) => row.querySelector(".ruricon-preset-title")!.textContent === "Native",
+  )!
+  const list = modal.querySelector<HTMLElement>(".ruricon-preset-list")!
+  list.scrollTop = 60
+  const scrollBeforeFavorite = list.scrollTop
+  assert(scrollBeforeFavorite > 0, "Favorite scroll check uses a scrollable list")
+  const cardTopBeforeFavorite = nativeFavoriteRow.getBoundingClientRect().top
+  click(".ruricon-preset-favorite", nativeFavoriteRow)
+  await tick()
+  assert(
+    [...modal.querySelectorAll(".ruricon-preset-row")].every(
+      (row, index) => row === openingRows[index],
+    ),
+    "Adding a favorite keeps card order and identity",
+  )
+  assert(
+    list.scrollTop === scrollBeforeFavorite &&
+      nativeFavoriteRow.getBoundingClientRect().top === cardTopBeforeFavorite,
+    "Adding a favorite preserves scroll and card position",
+  )
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:preset-favorites:v1")!).join(",") === "5033",
+    "Preset favorites persist under a separate storage key",
+  )
+  assert(
+    localStorage.getItem("ruricon:icon-view:v1") === iconPreferences,
+    "Preset favorite toggle leaves icon favorites and history untouched",
+  )
+  assert(
+    nativeFavoriteRow.querySelector(".ruricon-preset-favorite")!.getAttribute("aria-pressed") ===
+      "true",
+    "Favorite toggle exposes its state",
+  )
+  assert(
+    nativeFavoriteRow.getAttribute("data-favorite") === "true",
+    "Favorite card receives the yellow highlight",
+  )
+  hangulSearch.value = ""
+  void act(() => {
+    hangulSearch.dispatchEvent(new Event("input"))
+  })
+  assert(
+    countFor("Native") === "205개" && countFor("분할만") === "97개",
+    "Cached counts remain visible after switching presets",
+  )
+  assert(
+    modal.querySelector(".ruricon-preset-title")!.textContent!.includes("냥냥"),
+    "Open dialog defers favorite sorting until reopening",
+  )
+  assert(
+    comment.querySelector(".ruricon-preset-shortcut")?.getAttribute("data-preset-id") === "5033",
+    "Picker shortcuts put preset favorites first",
+  )
+  const favoriteBackground = getComputedStyle(nativeFavoriteRow).backgroundColor
+  click(".ruricon-preset-favorite", nativeFavoriteRow)
+  await tick()
+  assert(
+    modal.querySelector(".ruricon-preset-title")!.textContent!.includes("냥냥"),
+    "Removing the favorite also leaves the opening order unchanged",
+  )
+  assert(
+    list.scrollTop === scrollBeforeFavorite &&
+      nativeFavoriteRow.getBoundingClientRect().top === cardTopBeforeFavorite,
+    "Removing a favorite preserves scroll and card position",
+  )
+  assert(
+    nativeFavoriteRow.dataset.favorite === "false" &&
+      getComputedStyle(nativeFavoriteRow).backgroundColor === favoriteBackground,
+    "Selected card keeps its blue background when favorite state changes",
+  )
+  click(".ruricon-preset-favorite", nativeFavoriteRow)
+  click(
+    ".ruricon-preset-favorite",
+    [...modal.querySelectorAll<HTMLElement>(".ruricon-preset-row")].find((row) =>
+      row.querySelector(".ruricon-preset-title")!.textContent!.includes("냥냥"),
+    )!,
+  )
+  await tick()
+  assert(
+    [...modal.querySelectorAll<HTMLElement>('.ruricon-preset-row[data-favorite="true"]')]
+      .map((row) => row.querySelector(".ruricon-preset-title")!.textContent)
+      .join(",") === "냥냥 (M),Native",
+    "Multiple favorite markers activate without moving cards",
+  )
+  click(".ruricon-preset-favorite", modal)
+  await tick()
+  assert(
+    localStorage.getItem("ruricon:icon-view:v1") === iconPreferences,
+    "Repeated preset toggles never write icon preferences",
+  )
+  click(".ruricon-preset-cancel", modal)
+  await tick()
+  assert(
+    document.activeElement === comment.querySelector(".ruricon-preset-select"),
+    "Close restores focus",
+  )
+  assert(
+    comment.querySelector(".ruricon-preset-select")!.textContent!.includes("냥냥"),
+    "Cancel leaves the applied preset unchanged",
+  )
+  click(".ruricon-preset-select", comment)
+  await tick()
+  assert(
+    modal.querySelector(".ruricon-preset-title")!.textContent === "Native",
+    "Reopening keeps preset favorites first",
+  )
+  const nativeRow = modal.querySelector<HTMLElement>(".ruricon-preset-row")!
+  click(".ruricon-preset-count", nativeRow)
+  assert(
+    modal.open && comment.querySelector(".ruricon-preset-select")!.textContent!.includes("냥냥"),
+    "Preview selection waits for Apply",
+  )
+  click(".ruricon-preset-apply", modal)
+  await tick()
+  assert(
+    !modal.open && comment.querySelector(".ruricon-preset-select")!.textContent!.includes("Native"),
+    "Apply selects the previewed preset",
+  )
+  void act(cleanup)
+  const preferences = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  preferences.presetId = null
+  localStorage.setItem("ruricon:icon-view:v1", JSON.stringify(preferences))
+  const unmount = mountCommentIconHook()
+  click("button[onclick]", comment)
+  await tick()
+  assert(
+    comment.querySelector(".ruricon-preset-shortcut")!.getAttribute("data-preset-id") === "5033",
+    "Remount restores preset favorites from separate storage",
+  )
+  assert(
+    comment.querySelector(".ruricon-preset-select")!.textContent!.includes("Native"),
+    "Default selection follows preset favorites when the last selection is missing",
+  )
+  void act(unmount)
 }
 async function check() {
   assert(getLastId("app.icon_data_show(this, 5033);") === 5033, "Numeric ID isn't truncated")
@@ -191,6 +493,13 @@ async function check() {
   click("button[onclick]", comment)
   await tick()
   assert(nativeCalls === 0, "Capture stops native inline handlers")
+  if (location.search === "?preset-dialog") {
+    await checkPresetDialog(comment)
+    result.textContent =
+      "PASS: preset dialog links, Segment 1/native 50-icon preview, local ordering, shared Picker order, persistence, Apply and focus"
+    result.dataset.result = "PASS"
+    return
+  }
   assert(
     comment.querySelectorAll(".ruricon-icon-grid img").length === 96,
     "One whole segment is rendered",
@@ -521,9 +830,9 @@ async function check() {
   click(".ruricon-preset-select", reply)
   const modal = document.querySelector<HTMLDialogElement>("dialog")!
   assert(modal.open, "Native dialog opens")
-  const presetRow = modal.querySelector<HTMLButtonElement>(".ruricon-preset-list button")!
+  const presetRow = modal.querySelector<HTMLElement>(".ruricon-preset-row")!
   assert(
-    presetRow.firstElementChild?.classList.contains("ruricon-preset-thumbnail"),
+    presetRow.querySelector(".ruricon-preset-option > .ruricon-preset-thumbnail"),
     "Preset row thumbnail precedes label",
   )
   assert(getComputedStyle(presetRow).display === "flex", "Preset thumbnail and label share a row")
@@ -535,11 +844,11 @@ async function check() {
       hangulSearch.dispatchEvent(new Event("input"))
     })
     assert(
-      modal.querySelectorAll(".ruricon-preset-list button").length === 1,
+      modal.querySelectorAll(".ruricon-preset-row").length === 1,
       "Hangul composition and choseong filter preset rows",
     )
     assert(
-      modal.querySelector(".ruricon-preset-list button")!.textContent!.includes("냥냥"),
+      modal.querySelector(".ruricon-preset-row")!.textContent!.includes("냥냥"),
       "Matching Hangul preset remains visible",
     )
   }
@@ -560,7 +869,7 @@ async function check() {
   click(".ruricon-preset-select", comment)
   assert(document.querySelector("dialog") === modal, "Comment and reply reuse one native dialog")
   assert(modal.querySelector<HTMLInputElement>("input")!.value === "", "Reopening resets search")
-  click(".ruricon-preset-heading button", modal)
+  click(".ruricon-preset-cancel", modal)
   assert(!modal.open, "Dialog button closes the controlled modal")
   const shortcutRow = reply.querySelector<HTMLElement>(".ruricon-preset-shortcuts")!
   const strip = shortcutRow.querySelector<HTMLElement>(".ruricon-preset-strip")!
