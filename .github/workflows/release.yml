@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify tag commit is on main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run validate
+      - name: Set build version from tag
+        run: |
+          export RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          bun -e '
+            const pkg = await Bun.file("package.json").json();
+            pkg.version = process.env.RELEASE_VERSION;
+            await Bun.write("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+      - run: bun run build:userscript
+      - run: bun run zip
+      - run: bun run zip:firefox
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          assets=(
+            ".output/userscript/rulicon.user.js"
+            ".output/rulicon-${version}-chrome.zip"
+            ".output/rulicon-${version}-firefox.zip"
+          )
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
