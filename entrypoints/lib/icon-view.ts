@@ -181,3 +181,38 @@ export function loadCollection(preset: Preset): Promise<IconCollection> {
     }
   })
 }
+
+export async function loadAllIconImages(preset: Preset): Promise<string[]> {
+  let ids = [preset.id]
+  if (preset.mainId !== null) {
+    const article = await readArticle(
+      iconBoardId,
+      preset.mainId,
+      location.hostname === mobileDomain,
+    )
+    if (!article.success) throw new Error("대표 게시글을 읽지 못했습니다.")
+    const { state } = readMain(article.content)
+    if (!state || state.mainArticleId !== preset.mainId)
+      throw new Error("대표 게시글의 묶음 metadata를 확인해주세요.")
+    ids = [...state.slaves]
+      .filter((slave) => slave.articleId !== null)
+      .sort((a, b) => a.page - b.page)
+      .map((slave) => slave.articleId!)
+  }
+  const images: string[] = []
+  for (const id of ids) {
+    let offset = 0
+    while (true) {
+      const page = await readIconImages(id, offset, 100)
+      if (page.icons.some((src) => !/^https?:\/\//i.test(src) || !URL.canParse(src)))
+        throw new Error("아이콘 주소를 확인해주세요.")
+      if (typeof page.hasMore !== "boolean") throw new Error("아이콘 페이지 정보를 확인해주세요.")
+      images.push(...page.icons)
+      if (!page.hasMore) break
+      if (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset)
+        throw new Error("다음 페이지 위치를 확인할 수 없습니다.")
+      offset = page.nextOffset
+    }
+  }
+  return images
+}

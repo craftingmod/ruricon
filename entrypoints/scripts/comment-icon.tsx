@@ -18,6 +18,7 @@ import {
 } from "lucide-preact"
 import { createPortal, createRef, h, render as renderView, type Ref } from "preact"
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "preact/hooks"
+import { VirtuosoGrid, type GridScrollSeekPlaceholderProps } from "react-virtuoso"
 
 import {
   PresetDialog,
@@ -28,6 +29,7 @@ import {
 import { cx } from "../lib/cx.ts"
 import {
   loadCollection,
+  loadAllIconImages,
   fixedAdPresetIds,
   loadNativePage,
   loadPresets,
@@ -60,6 +62,16 @@ const localIconLimit = 1000
 const appRef = createRef<AppHandle>()
 const ownedContainers = new Map<HTMLElement, HTMLElement>()
 let appRoot: HTMLElement | null = null
+
+const testGridComponents = {
+  ScrollSeekPlaceholder: ({ height, width }: GridScrollSeekPlaceholderProps) => (
+    <div class="ruricon-icon-seek-placeholder" style={{ height, width }} aria-hidden="true" />
+  ),
+}
+const testScrollSeek = {
+  enter: (velocity: number) => Math.abs(velocity) > 1200,
+  exit: (velocity: number) => Math.abs(velocity) < 50,
+}
 
 function readPreferences(): Saved {
   try {
@@ -481,6 +493,8 @@ function IconView({
   const selectionMode = mode === "favorites" && editMode
   const selectedCount = saved.favorites.filter((src) => selection.has(src)).length
   const [pageIndex, setPageIndex] = useState(0)
+  const [testPage, setTestPage] = useState(false)
+  const [testImages, setTestImages] = useState<string[]>([])
   const [nativePages, setNativePages] = useState(new Map<number, string[]>())
   const [ready, setReady] = useState(false)
   const [loading, setLoading] = useState<{
@@ -604,6 +618,7 @@ function IconView({
   }
 
   async function selectPreset(preset: Preset) {
+    setTestPage(false)
     setSelected(preset)
     setMode("all")
     setPageIndex(0)
@@ -624,6 +639,7 @@ function IconView({
   }
 
   async function changePage(next: number) {
+    setTestPage(false)
     setPageIndex(next)
     if (mode !== "all" || !collection?.nativeId || nativePages.has(next)) {
       revision.current++
@@ -638,6 +654,13 @@ function IconView({
       },
       () => changePage(next),
     )
+  }
+
+  async function openTestPage() {
+    if (!selected) return
+    setTestPage(true)
+    setTestImages([])
+    await request(() => loadAllIconImages(selected), setTestImages, openTestPage)
   }
 
   async function initialize() {
@@ -658,6 +681,7 @@ function IconView({
   }
 
   function changeMode(next: Mode) {
+    setTestPage(false)
     revision.current++
     setMode(next)
     setPageIndex(0)
@@ -866,7 +890,7 @@ function IconView({
                 key={number}
                 type="button"
                 aria-label={`${number}페이지`}
-                aria-current={page === index ? "page" : undefined}
+                aria-current={!testPage && page === index ? "page" : undefined}
                 onClick={() => {
                   void changePage(page)
                 }}
@@ -875,6 +899,16 @@ function IconView({
               </button>
             )
           })}
+          <button
+            type="button"
+            aria-label="Test"
+            title="Virtuoso 실험: 모든 페이지의 아이콘"
+            aria-current={testPage ? "page" : undefined}
+            disabled={loading.busy || !selected}
+            onClick={() => void openTestPage()}
+          >
+            Test
+          </button>
         </nav>
         <div class="ruricon-icon-actions">
           <button
@@ -950,22 +984,51 @@ function IconView({
       >
         다시 시도
       </button>
-      <div ref={grid} class="ruricon-icon-grid" aria-label="아이콘 목록">
-        {orderedImages.map((src, position) => (
-          <IconTile
-            key={src}
-            src={src}
-            index={position}
-            favorite={favorites.has(src)}
-            recent={mode === "all" && recent.has(src)}
-            insert={insertIcon}
-            setFavorite={setFavorite}
-            moveFavoriteToFront={mode === "favorites" && editMode ? moveFavoriteToFront : undefined}
-            selectIcon={selectionMode ? selectIcon : undefined}
-            selected={selectionMode && selection.has(src)}
+      <div
+        ref={grid}
+        class={cx("ruricon-icon-grid", testPage && "ruricon-icon-test")}
+        aria-label={testPage ? `Test 아이콘 ${testImages.length}개` : "아이콘 목록"}
+      >
+        {testPage ? (
+          <VirtuosoGrid
+            key={selected?.id}
+            style={{ height: "100%" }}
+            data={testImages}
+            components={testGridComponents}
+            scrollSeekConfiguration={testScrollSeek}
+            computeItemKey={(position) => position}
+            listClassName="ruricon-icon-test-list"
+            itemContent={(position, src) => (
+              <IconTile
+                src={src}
+                index={position}
+                favorite={favorites.has(src)}
+                recent={recent.has(src)}
+                insert={insertIcon}
+                setFavorite={setFavorite}
+                selected={false}
+              />
+            )}
           />
-        ))}
-        {!images.length && !loading.busy && (
+        ) : (
+          orderedImages.map((src, position) => (
+            <IconTile
+              key={src}
+              src={src}
+              index={position}
+              favorite={favorites.has(src)}
+              recent={mode === "all" && recent.has(src)}
+              insert={insertIcon}
+              setFavorite={setFavorite}
+              moveFavoriteToFront={
+                mode === "favorites" && editMode ? moveFavoriteToFront : undefined
+              }
+              selectIcon={selectionMode ? selectIcon : undefined}
+              selected={selectionMode && selection.has(src)}
+            />
+          ))
+        )}
+        {!(testPage ? testImages : images).length && !loading.busy && (
           <div class="ruricon-icon-empty" role="img" aria-label="표시할 아이콘이 없습니다.">
             <SquareOff size={32} aria-hidden="true" focusable="false" />
           </div>

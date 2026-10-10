@@ -213,11 +213,14 @@
   background: #8882;
   border-color: transparent;
 }
-.ruricon-icon-grid {
+.ruricon-icon-grid,
+.ruricon-icon-test-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--ruricon-icon-size), 1fr));
 
   gap: 5px;
+}
+.ruricon-icon-grid {
   max-height: min(50dvh, 480px);
 
   overflow-y: auto;
@@ -228,6 +231,17 @@
 
   padding: 3px;
   justify-content: start;
+}
+.ruricon-icon-grid.ruricon-icon-test {
+  display: block;
+  height: min(50dvh, 480px);
+  overflow: hidden;
+}
+.ruricon-icon-seek-placeholder {
+  box-sizing: border-box;
+  border: 1px solid #aaa6;
+  border-radius: 6px;
+  background: #fff;
 }
 
 /* 터치 환경 */

@@ -1233,6 +1233,41 @@ async function check() {
   click("button[onclick]", comment)
   await tick()
   assert(nativeCalls === 0, "Capture stops native inline handlers")
+  /*
+  if (location.search === "?virtuoso") {
+    await choose("Native", comment)
+    click('[aria-label="3페이지"]', comment)
+    await tick()
+    const beforeRequests = requests.length
+    click('[aria-label="Test"]', comment)
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    await waitFor(() => !!comment.querySelector('.ruricon-icon-test [data-index="0"]'))
+    const grid = comment.querySelector<HTMLElement>(".ruricon-icon-test")!
+    const rendered = () => grid.querySelectorAll<HTMLImageElement>(".ruricon-icon-insert img")
+    assert(rendered().length > 0 && rendered().length < 2000, "Only viewport icons mount")
+    assert(
+      [...rendered()].every((image) => image.src === nativeSource(5033, 0)),
+      "Test repeats the first icon from page one, even when opened from page three",
+    )
+    const scroller = grid.querySelector<HTMLElement>('[data-virtuoso-scroller="true"]')!
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: "instant" })
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    await waitFor(() => !!grid.querySelector('[aria-label="아이콘 2000 삽입"]'))
+    assert(rendered().length < 2000, "Scrolling to icon 2000 keeps the DOM virtualized")
+    assert(!grid.querySelector('[aria-label="아이콘 1 삽입"]'), "Offscreen icons unmount")
+    assert(requests.length === beforeRequests, "Test makes no additional API requests")
+    click('[aria-label="1페이지"]', comment)
+    assert(!comment.querySelector(".ruricon-icon-test"), "Normal page exits Test")
+    assert(comment.querySelectorAll(".ruricon-icon-tile").length === 100, "Normal grid is retained")
+    void act(cleanup)
+    result.textContent =
+      "PASS: Test repeats 2,000 icons, virtualizes scrolling and restores normal pages"
+    result.dataset.result = "PASS"
+    return
+  }
+  */
   if (location.search === "?image-preset") {
     const manage = comment.querySelector<HTMLAnchorElement>(".ruricon-preset-manage")!
     assert(
@@ -1348,9 +1383,9 @@ async function check() {
       iconSize,
     "Grid icon size follows the site domain",
   )
-  const numbers = [...comment.querySelectorAll(".ruricon-icon-pages button")].map(
-    (button) => button.textContent,
-  )
+  const numbers = [
+    ...comment.querySelectorAll('.ruricon-icon-pages button:not([aria-label="Test"])'),
+  ].map((button) => button.textContent)
   assert(numbers.join(",") === "1,3", "Segment page numbers and order")
   assert(!comment.querySelector(".ruricon-icon-count"), "Redundant info row is removed")
   const toolbar = comment.querySelector<HTMLElement>(".ruricon-icon-toolbar")!
@@ -1437,7 +1472,7 @@ async function check() {
     "Favorite buttons are hidden by default",
   )
   enableEditMode(comment)
-  click(".ruricon-icon-pages button:last-child", comment)
+  click('[aria-label="3페이지"]', comment)
   assert(
     comment.querySelectorAll(".ruricon-icon-grid img").length === 1,
     "Segment changes by page button",
@@ -1522,7 +1557,10 @@ async function check() {
     comment.querySelector<HTMLImageElement>(".icon_preview")?.src === nativeSource(5033, 1),
     "Video insertion passes the hidden image to the native adapter",
   )
-  assert(comment.querySelectorAll(".ruricon-icon-pages button").length === 3, "Native page count")
+  assert(
+    comment.querySelectorAll('.ruricon-icon-pages button:not([aria-label="Test"])').length === 3,
+    "Native page count",
+  )
   click(".ruricon-icon-pages button:nth-child(2)", comment)
   await tick()
   assert(scrollingGrid.scrollTop === 0, "Changing icon pages still resets grid scroll")
@@ -1541,7 +1579,7 @@ async function check() {
       nativeSource(5033, 100),
     "Offset page removes the icon query",
   )
-  click(".ruricon-icon-pages button:last-child", comment)
+  click('[aria-label="3페이지"]', comment)
   await tick()
   assert(comment.querySelectorAll(".ruricon-icon-grid img").length === 5, "Last partial fetch page")
   click(".ruricon-icon-pages button:first-child", comment)
@@ -2011,7 +2049,7 @@ async function check() {
     ).borderColor === "rgb(233, 163, 35)",
     "Favorite border takes precedence over recent border",
   )
-  click(".ruricon-icon-pages button:last-child", comment)
+  click('[aria-label="3페이지"]', comment)
   assert(
     recentGrid.querySelectorAll('[data-recent="true"]').length === 1,
     "Other set page retains its newest recent marker",
