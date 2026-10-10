@@ -1,8 +1,17 @@
 import {
+  ArrowUp,
   ArrowUpToLine,
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock3,
+  LayoutGrid,
+  List,
+  ListClock,
+  MoveUp,
+  Pencil,
+  PencilOff,
+  SquareDashed,
   SquareOff,
   Star,
   StarIcon,
@@ -12,6 +21,7 @@ import {
 import { createPortal, createRef, h, render as renderView, type Ref } from "preact"
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "preact/hooks"
 
+import { cx } from "../lib/cx.ts"
 import {
   loadCollection,
   loadNativePage,
@@ -346,6 +356,8 @@ function IconTile({
   insert,
   setFavorite,
   moveFavoriteToFront,
+  selectIcon,
+  selected,
 }: {
   src: string
   index: number
@@ -354,6 +366,8 @@ function IconTile({
   insert: (image: HTMLImageElement, src: string) => Promise<void>
   setFavorite: (src: string, favorite: boolean) => void
   moveFavoriteToFront?: (src: string) => void
+  selectIcon?: (src: string) => void
+  selected: boolean
 }) {
   const image = useRef<HTMLImageElement>(null)
   return (
@@ -361,9 +375,11 @@ function IconTile({
       <button
         type="button"
         class="ruricon-icon-insert"
-        aria-label={`아이콘 ${index + 1} 삽입`}
+        aria-label={`아이콘 ${index + 1} ${selectIcon ? "선택" : "삽입"}`}
+        aria-pressed={selectIcon ? selected : undefined}
         onClick={() => {
-          void insert(image.current!, src)
+          if (selectIcon) selectIcon(src)
+          else void insert(image.current!, src)
         }}
       >
         <img
@@ -377,6 +393,11 @@ function IconTile({
           <video src={src} preload="metadata" muted playsInline aria-hidden="true" />
         )}
       </button>
+      {selected && (
+        <span class="ruricon-icon-selected" aria-hidden="true">
+          <Check size={16} />
+        </span>
+      )}
       <button
         type="button"
         class="ruricon-icon-star"
@@ -427,6 +448,9 @@ function IconView({
   const [collection, setCollection] = useState<IconCollection | null>(null)
   const [mode, setMode] = useState<Mode>("all")
   const { editMode } = saved
+  const [selection, setSelection] = useState(new Set<string>())
+  const selectionMode = mode === "favorites" && editMode
+  const selectedCount = saved.favorites.filter((src) => selection.has(src)).length
   const [pageIndex, setPageIndex] = useState(0)
   const [nativePages, setNativePages] = useState(new Map<number, string[]>())
   const [ready, setReady] = useState(false)
@@ -483,6 +507,10 @@ function IconView({
     container.hidden = !visible
     container.style.display = visible ? "block" : "none"
   }, [container, visible])
+
+  useLayoutEffect(() => {
+    setSelection((current) => (current.size ? new Set<string>() : current))
+  }, [visible, mode, editMode, selected?.id])
 
   useLayoutEffect(() => {
     grid.current?.scrollTo({ top: 0, behavior: "instant" })
@@ -640,6 +668,15 @@ function IconView({
     )
   }
 
+  function selectIcon(src: string) {
+    setSelection((current) => {
+      const next = new Set(current)
+      if (next.has(src)) next.delete(src)
+      else next.add(src)
+      return next
+    })
+  }
+
   async function insertIcon(image: HTMLImageElement, src: string) {
     try {
       const wrapper = image.closest(".common_write_wrapper")
@@ -716,31 +753,30 @@ function IconView({
           {(
             [
               ["all", "전체"],
-              ["favorites", "★ 즐겨찾기"],
+              ["favorites", "즐겨찾기"],
               ["recent", "최근 사용"],
             ] as const
           ).map(([value, label]) => (
             <button
               key={value}
               type="button"
+              aria-label={label}
+              title={label}
               aria-pressed={value === mode}
               disabled={loading.busy && !ready}
               onClick={() => changeMode(value)}
             >
-              {label}
+              {value === "favorites" ? (
+                <Star size={18} aria-hidden="true" focusable="false" />
+              ) : value === "recent" ? (
+                <Clock3 size={18} aria-hidden="true" focusable="false" />
+              ) : value === "all" ? (
+                <List size={18} aria-hidden="true" focusable="false" />
+              ) : (
+                label
+              )}
             </button>
           ))}
-          <button
-            type="button"
-            class="ruricon-icon-clear-recent"
-            hidden={mode !== "recent"}
-            disabled={!saved.recent.length}
-            aria-label="최근 사용 기록 삭제"
-            title="최근 사용 기록 삭제"
-            onClick={() => updateSaved((current) => ({ ...current, recent: [] }))}
-          >
-            <Trash2 size={16} aria-hidden="true" focusable="false" />
-          </button>
         </div>
         <nav
           ref={pages}
@@ -765,38 +801,57 @@ function IconView({
             )
           })}
         </nav>
-        <button
-          type="button"
-          class="ruricon-icon-edit-mode"
-          hidden={mode !== "favorites"}
-          aria-pressed={editMode}
-          onClick={() => updateSaved((current) => ({ ...current, editMode: !current.editMode }))}
-        >
-          <Star
-            size={16}
-            fill={editMode ? "currentColor" : "none"}
-            aria-hidden="true"
-            focusable="false"
-          />
-          편집 모드
-        </button>
-        <button
-          type="button"
-          class="ruricon-icon-prioritize-recent"
-          hidden={mode !== "recent"}
-          aria-pressed={saved.prioritizeRecent}
-          title="전체 탭에서 최근 사용 아이콘 우선 정렬"
-          onClick={() =>
-            updateSaved((current) => ({ ...current, prioritizeRecent: !current.prioritizeRecent }))
-          }
-        >
-          {saved.prioritizeRecent ? (
-            <Check size={16} aria-hidden="true" focusable="false" />
-          ) : (
-            <X size={16} aria-hidden="true" focusable="false" />
-          )}
-          우선 정렬
-        </button>
+        <div class="ruricon-icon-actions" hidden={mode === "all"}>
+          <button
+            type="button"
+            class={cx("ruricon-icon-action", "ruricon-icon-edit-mode")}
+            hidden={mode !== "favorites"}
+            aria-pressed={editMode}
+            onClick={() => updateSaved((current) => ({ ...current, editMode: !current.editMode }))}
+          >
+            {editMode ? (
+              <Pencil size={16} aria-hidden="true" focusable="false" />
+            ) : (
+              <PencilOff size={16} aria-hidden="true" focusable="false" />
+            )}
+            편집
+          </button>
+          <button
+            type="button"
+            class={cx("ruricon-icon-action", "ruricon-icon-clear-recent")}
+            hidden={mode !== "recent"}
+            disabled={!saved.recent.length}
+            aria-label="최근 사용 기록 삭제"
+            title="최근 사용 기록 삭제"
+            onClick={() => {
+              if (window.confirm("최근 사용 기록을 모두 삭제하시겠습니까?"))
+                updateSaved((current) => ({ ...current, recent: [] }))
+            }}
+          >
+            <Trash2 size={16} aria-hidden="true" focusable="false" />
+            삭제
+          </button>
+          <button
+            type="button"
+            class={cx("ruricon-icon-action", "ruricon-icon-prioritize-recent")}
+            hidden={mode !== "recent"}
+            aria-pressed={saved.prioritizeRecent}
+            title="전체 탭에서 최근 사용 아이콘 우선 정렬"
+            onClick={() =>
+              updateSaved((current) => ({
+                ...current,
+                prioritizeRecent: !current.prioritizeRecent,
+              }))
+            }
+          >
+            {saved.prioritizeRecent ? (
+              <ArrowUp size={16} aria-hidden="true" focusable="false" />
+            ) : (
+              <X size={16} aria-hidden="true" focusable="false" />
+            )}
+            고정
+          </button>
+        </div>
       </div>
       <div role="status">{[loading.message, storageError].filter(Boolean).join(" ")}</div>
       <button
@@ -819,6 +874,8 @@ function IconView({
             insert={insertIcon}
             setFavorite={setFavorite}
             moveFavoriteToFront={mode === "favorites" && editMode ? moveFavoriteToFront : undefined}
+            selectIcon={selectionMode ? selectIcon : undefined}
+            selected={selectionMode && selection.has(src)}
           />
         ))}
         {!images.length && !loading.busy && (
@@ -827,6 +884,35 @@ function IconView({
           </div>
         )}
       </div>
+      {selectionMode && (
+        <div class="ruricon-icon-selection-actions">
+          <button
+            type="button"
+            class={cx("ruricon-icon-action", "ruricon-icon-select-all")}
+            disabled={!saved.favorites.length}
+            onClick={() => setSelection(new Set(saved.favorites))}
+          >
+            <SquareDashed size={16} aria-hidden="true" focusable="false" />
+            모두 선택
+          </button>
+          <button
+            type="button"
+            class={cx("ruricon-icon-action", "ruricon-icon-delete-selected")}
+            disabled={!selectedCount}
+            onClick={() => {
+              if (!window.confirm(`선택한 즐겨찾기 ${selectedCount}개를 삭제하시겠습니까?`)) return
+              updateSaved((current) => ({
+                ...current,
+                favorites: current.favorites.filter((src) => !selection.has(src)),
+              }))
+              setSelection(new Set<string>())
+            }}
+          >
+            <Trash2 size={16} aria-hidden="true" focusable="false" />
+            {selectedCount}개 삭제
+          </button>
+        </div>
+      )}
     </section>,
     container,
   )

@@ -18,6 +18,13 @@ let releaseSlow: (() => void) | null = null
 let releaseInsert: (() => void) | null = null
 const result = document.querySelector<HTMLElement>("#result")!
 const originalFetch = window.fetch
+const originalConfirm = window.confirm
+let confirmDeletion = true
+const deletionPrompts: string[] = []
+window.confirm = (message) => {
+  deletionPrompts.push(String(message))
+  return confirmDeletion
+}
 let nativeCalls = 0
 window.app = {
   select_icon(image) {
@@ -1176,6 +1183,223 @@ async function check() {
     !orderGrid.querySelector(".ruricon-icon-move-first"),
     "Recent tab does not show reorder buttons",
   )
+  const actions = ["edit-mode", "clear-recent", "prioritize-recent"].map((name) =>
+    comment.querySelector<HTMLButtonElement>(`.ruricon-icon-${name}`)!,
+  )
+  assert(
+    actions.every((button) => button.classList.contains("ruricon-icon-action")),
+    "Toolbar actions keep individual classes and share the common class",
+  )
+  for (const tabIndex of [1, 2, 3]) {
+    click(`.ruricon-icon-tabs button:nth-child(${tabIndex})`, comment)
+    for (const [index, button] of actions.entries()) {
+      const style = getComputedStyle(button)
+      const shown = index === 0 ? tabIndex === 2 : tabIndex === 3
+      assert(
+        style.display === (shown ? "flex" : "none"),
+        "Every action follows its tab visibility even outside the tabs container",
+      )
+      assert(
+        style.minHeight === "36px" && style.gap === "6px" && style.padding === "0px 12px",
+        "Every action uses unified sizing and spacing",
+      )
+    }
+  }
+  const actionGroup = comment.querySelector<HTMLElement>(".ruricon-icon-actions")!
+  const actionToolbar = comment.querySelector<HTMLElement>(".ruricon-icon-toolbar")!
+  const previousActionWidth = comment.style.maxWidth
+  for (const width of ["720px", "280px"]) {
+    comment.style.maxWidth = width
+    const clearBounds = actions[1].getBoundingClientRect()
+    const priorityBounds = actions[2].getBoundingClientRect()
+    assert(
+      Math.abs(
+        actionGroup.getBoundingClientRect().right - actionToolbar.getBoundingClientRect().right,
+      ) < 1,
+      "Action group stays right aligned on wide and narrow layouts",
+    )
+    assert(
+      clearBounds.top === priorityBounds.top &&
+        Math.abs(priorityBounds.left - clearBounds.right - 8) < 1,
+      "Delete and priority stay together with an 8px gap",
+    )
+  }
+  comment.style.maxWidth = previousActionWidth
+  const beforeActionClear = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    beforeActionClear.recent.length > 0 && !actions[1].disabled,
+    "History deletion starts enabled with saved history",
+  )
+  assert(
+    getComputedStyle(actions[1]).color === "rgb(255, 56, 60)" &&
+      getComputedStyle(actions[1]).borderColor === "rgb(255, 56, 60)",
+    "History delete is highlighted in the requested red",
+  )
+  confirmDeletion = false
+  click(".ruricon-icon-clear-recent", comment)
+  assert(
+    JSON.stringify(JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)) ===
+      JSON.stringify(beforeActionClear) &&
+      !actions[1].disabled &&
+      orderGrid.querySelector("img"),
+    "Canceling history confirmation preserves saved data and the recent list",
+  )
+  assert(
+    deletionPrompts.at(-1) === "최근 사용 기록을 모두 삭제하시겠습니까?",
+    "History delete asks for confirmation",
+  )
+  confirmDeletion = true
+  click(".ruricon-icon-clear-recent", comment)
+  const afterActionClear = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    !afterActionClear.recent.length &&
+      JSON.stringify({ ...afterActionClear, recent: beforeActionClear.recent }) ===
+        JSON.stringify(beforeActionClear),
+    "Shared-style delete button clears only saved recent history",
+  )
+  assert(
+    actions[1].disabled && !orderGrid.querySelector("img"),
+    "Cleared history disables the delete button and empties the recent grid",
+  )
+  click(".ruricon-icon-tabs button:first-child", comment)
+  click('.ruricon-icon-star[aria-pressed="false"]', orderGrid)
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  const selectedDelete = () =>
+    comment.querySelector<HTMLButtonElement>(".ruricon-icon-delete-selected")!
+  const selectionImages = [...orderGrid.querySelectorAll<HTMLImageElement>("img")].slice(0, 2)
+  const selectionButtons = selectionImages.map((image) =>
+    image.closest(".ruricon-icon-tile")!.querySelector<HTMLButtonElement>(".ruricon-icon-insert")!,
+  )
+  const beforeSelection = localStorage.getItem("ruricon:icon-view:v1")
+  const nativeSelectionInsert = window.app.select_icon
+  let selectionInsertCalls = 0
+  window.app.select_icon = (image) => {
+    selectionInsertCalls++
+    return nativeSelectionInsert(image)
+  }
+  assert(
+    selectedDelete().disabled && selectedDelete().textContent!.includes("0개 삭제"),
+    "Selection mode starts empty",
+  )
+  assert(
+    !orderGrid.contains(selectedDelete()) &&
+      orderGrid.nextElementSibling?.contains(selectedDelete()),
+    "Bulk delete lives in a separate DOM below the grid",
+  )
+  const selectFavorite = (index: number) => {
+    const image = [...orderGrid.querySelectorAll<HTMLImageElement>("img")].find(
+      (item) => item.src === selectionImages[index].src,
+    )!
+    return click(".ruricon-icon-insert", image.closest(".ruricon-icon-tile")!)
+  }
+  const selectAll = comment.querySelector<HTMLButtonElement>(".ruricon-icon-select-all")!
+  assert(
+    selectAll.nextElementSibling === selectedDelete(),
+    "Select-all sits immediately left of delete",
+  )
+  click(".ruricon-icon-select-all", comment)
+  assert(
+    orderGrid.querySelectorAll('.ruricon-icon-insert[aria-pressed="true"]').length === 3 &&
+      selectedDelete().textContent!.includes("3개 삭제"),
+    "Select-all selects every favorite",
+  )
+  click(".ruricon-icon-select-all", comment)
+  assert(
+    orderGrid.querySelectorAll('.ruricon-icon-insert[aria-pressed="true"]').length === 3 &&
+      localStorage.getItem("ruricon:icon-view:v1") === beforeSelection &&
+      selectionInsertCalls === 0,
+    "Select-all is idempotent and does not insert or persist selection",
+  )
+  for (const tile of orderGrid.querySelectorAll<HTMLElement>(".ruricon-icon-tile"))
+    click(".ruricon-icon-insert", tile)
+  selectFavorite(0)
+  selectFavorite(1)
+  assert(
+    selectionButtons.every((button) => button.getAttribute("aria-pressed") === "true") &&
+      selectedDelete().textContent!.includes("2개 삭제"),
+    "Favorite edit mode supports multiple selected icons",
+  )
+  selectFavorite(0)
+  assert(
+    selectionButtons[0].getAttribute("aria-pressed") === "false" &&
+      selectedDelete().textContent!.includes("1개 삭제"),
+    "Clicking a selected icon deselects it",
+  )
+  selectFavorite(0)
+  assert(
+    selectionInsertCalls === 0 && localStorage.getItem("ruricon:icon-view:v1") === beforeSelection,
+    "Selecting icons neither inserts nor modifies saved preferences",
+  )
+  click(".ruricon-icon-tabs button:first-child", comment)
+  assert(
+    !comment.querySelector(".ruricon-icon-delete-selected"),
+    "Leaving Favorites hides selection actions",
+  )
+  click(".ruricon-icon-tabs button:nth-child(2)", comment)
+  assert(selectedDelete().disabled, "Returning to Favorites clears selection")
+  selectFavorite(0)
+  click("button[onclick]", comment)
+  click("button[onclick]", comment)
+  assert(
+    selectedDelete().disabled && localStorage.getItem("ruricon:icon-view:v1") === beforeSelection,
+    "Closing and reopening a view clears selection without changing saved state",
+  )
+  selectFavorite(0)
+  click(".ruricon-icon-edit-mode", comment)
+  assert(
+    !comment.querySelector(".ruricon-icon-delete-selected"),
+    "Turning edit mode off leaves selection mode",
+  )
+  selectFavorite(0)
+  await tick()
+  assert(Number(selectionInsertCalls) === 1, "Favorite icons insert normally when edit mode is off")
+  click(".ruricon-icon-edit-mode", comment)
+  assert(selectedDelete().disabled, "Turning edit mode back on starts with no selection")
+  selectFavorite(0)
+  selectFavorite(1)
+  const beforeBulkDelete = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    getComputedStyle(selectedDelete()).color === "rgb(255, 56, 60)" &&
+      getComputedStyle(selectedDelete()).borderColor === "rgb(255, 56, 60)",
+    "Selected delete uses the same requested red",
+  )
+  confirmDeletion = false
+  click(".ruricon-icon-delete-selected", comment)
+  assert(
+    JSON.stringify(JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)) ===
+      JSON.stringify(beforeBulkDelete) &&
+      orderGrid.querySelectorAll('.ruricon-icon-insert[aria-pressed="true"]').length === 2 &&
+      selectedDelete().textContent!.includes("2개 삭제"),
+    "Canceling selected deletion preserves data and selection",
+  )
+  assert(
+    deletionPrompts.at(-1) === "선택한 즐겨찾기 2개를 삭제하시겠습니까?",
+    "Selected deletion confirms the selected count",
+  )
+  confirmDeletion = true
+  click(".ruricon-icon-delete-selected", comment)
+  const afterBulkDelete = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  assert(
+    afterBulkDelete.favorites.join(",") === beforeBulkDelete.favorites.slice(2).join(",") &&
+      JSON.stringify({ ...afterBulkDelete, favorites: beforeBulkDelete.favorites }) ===
+        JSON.stringify(beforeBulkDelete),
+    "Bulk delete removes only selected favorites and preserves history and settings",
+  )
+  assert(
+    orderGrid.querySelectorAll("img").length === 1 && selectedDelete().disabled,
+    "Bulk delete resets selection and preserves the unselected icon",
+  )
+  click(".ruricon-icon-insert", orderGrid)
+  click(".ruricon-icon-delete-selected", comment)
+  assert(
+    !orderGrid.querySelector("img") && selectedDelete().disabled,
+    "Deleting the last selected favorite shows an empty list",
+  )
+  assert(
+    comment.querySelector<HTMLButtonElement>(".ruricon-icon-select-all")!.disabled,
+    "Empty favorites disable select-all",
+  )
+  window.app.select_icon = nativeSelectionInsert
   void act(cleanupOrderReload)
   result.textContent =
     "PASS: API parsing, segment/native pages, URL preservation, favorites/recent, retry, races, comment/reply ownership and cleanup"
@@ -1188,4 +1412,5 @@ void check()
   })
   .finally(() => {
     window.fetch = originalFetch
+    window.confirm = originalConfirm
   })
