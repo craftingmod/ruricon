@@ -36,6 +36,22 @@ jobs:
       - run: bun run build:userscript
       - run: bun run zip
       - run: bun run zip:firefox
+      - name: Commit userscript to orphan branch
+        run: |
+          branch_dir="$RUNNER_TEMP/userscript"
+          if git show-ref --verify --quiet refs/remotes/origin/userscript; then
+            git worktree add --detach "$branch_dir" origin/userscript
+          else
+            git worktree add --detach "$branch_dir" HEAD
+            git -C "$branch_dir" switch --orphan userscript
+          fi
+          git -C "$branch_dir" rm -rf --ignore-unmatch .
+          cp .output/userscript/rulicon.{meta,user}.js "$branch_dir/"
+          git -C "$branch_dir" config user.name "github-actions[bot]"
+          git -C "$branch_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$branch_dir" add rulicon.meta.js rulicon.user.js
+          git -C "$branch_dir" commit --allow-empty -m "Release $GITHUB_REF_NAME"
+          git -C "$branch_dir" push origin HEAD:refs/heads/userscript
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

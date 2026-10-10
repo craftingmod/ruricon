@@ -2,7 +2,7 @@
   "name": "rulicon",
   "description": "Ruliweb icon extension",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -30,6 +30,7 @@
     "oxlint-tsgolint": "^7.0.2003",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
+    "vite-plugin-monkey": "^8.1.1",
     "web-ext": "^10.5.0",
     "wxt": "^0.21.3"
   },

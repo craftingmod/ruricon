@@ -5,8 +5,23 @@ import { runInNewContext } from "node:vm"
 import { mobileDomain, pcDomain } from "../entrypoints/lib/ruli-constants.ts"
 
 const output = new URL("../.output/userscript/", import.meta.url)
-assert.deepEqual(readdirSync(output), ["rulicon.user.js"])
+assert.deepEqual(readdirSync(output).sort(), ["rulicon.meta.js", "rulicon.user.js"])
 const code = readFileSync(new URL("rulicon.user.js", output), "utf8")
+const meta = readFileSync(new URL("rulicon.meta.js", output), "utf8")
+assert.equal(
+  meta.trim(),
+  code.slice(0, code.indexOf("// ==/UserScript==") + "// ==/UserScript==".length),
+)
+assert.ok(
+  meta.includes(
+    "// @updateURL https://raw.githubusercontent.com/craftingmod/ruricon/userscript/rulicon.meta.js\n",
+  ),
+)
+assert.ok(
+  meta.includes(
+    "// @downloadURL https://raw.githubusercontent.com/craftingmod/ruricon/userscript/rulicon.user.js\n",
+  ),
+)
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
 assert.ok(code.startsWith("// ==UserScript==\n"))
 assert.ok(code.includes(`// @version ${version}\n`))
@@ -35,8 +50,19 @@ runInNewContext(code, {
     addEventListener() {},
     removeEventListener() {},
     querySelector: () => null,
-    createElement: () => ({ style: {}, addEventListener() {} }),
-    head: { append: (style) => styles.push(style) },
+    createElement: () => ({
+      style: {},
+      addEventListener() {},
+      append(css) {
+        this.textContent = css
+      },
+    }),
+    head: {
+      appendChild: (style) => {
+        styles.push(style)
+        return style
+      },
+    },
     body: { append: (button) => buttons.push(button) },
   },
   window: { addEventListener: (name, callback) => listeners.set(name, callback) },
@@ -46,8 +72,13 @@ runInNewContext(code, {
   },
 })
 await Promise.resolve()
-assert.equal(styles.length, 1)
-assert.ok(styles[0].textContent.includes(".ruricon-upload"))
+assert.ok(styles.length > 0)
+assert.ok(
+  styles
+    .map((style) => style.textContent)
+    .join("\n")
+    .includes(".ruricon-upload"),
+)
 assert.equal(buttons.length, 1)
 assert.equal(buttons[0].textContent, "Rulicon 실행 확인")
 assert.ok(listeners.has("pagehide"))
@@ -55,4 +86,6 @@ listeners.get("pagehide")({ persisted: true })
 assert.equal(observerDisconnects, 0)
 listeners.get("pagehide")({ persisted: false })
 assert.equal(observerDisconnects, 2)
-console.log("PASS: userscript metadata, standalone JS/CSS, editor startup and pagehide")
+console.log(
+  "PASS: userscript/meta pair, update URLs, standalone JS/CSS, editor startup and pagehide",
+)
