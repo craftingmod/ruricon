@@ -22,6 +22,11 @@ const nativeSource = (id: number, index: number) => source(id, index).split("?")
 let failSecondPage = true
 let releaseSlow: (() => void) | null = null
 let releaseInsert: (() => void) | null = null
+let storageCount = 48
+let storageSuccess = true
+let storageStatus = 200
+let holdStorage = false
+let releaseStorage: (() => void) | null = null
 const removedNativeFavorites = new Set<number>()
 const removalCalls: number[] = []
 let failRemovalId: number | null = 5033
@@ -60,6 +65,17 @@ window.fetch = async (input, options) => {
   requests.push(url.href)
   if (url.hostname === "api.ruliweb.com") {
     assert(options?.credentials === "include", "API includes login cookies")
+    if (url.searchParams.get("type") === "preset") {
+      if (holdStorage)
+        await new Promise<void>((resolve) => {
+          releaseStorage = resolve
+        })
+      if (storageStatus !== 200) return new Response("fail", { status: storageStatus })
+      return Response.json({
+        success: storageSuccess,
+        html: `<div>Storage</div><div><div>${Array.from({ length: storageCount }, (_, index) => `<img src="${source(999, index)}">`).join("")}</div></div>`,
+      })
+    }
     if (url.pathname === "/comment_icon_pick_remove") {
       assert(options?.method?.toLowerCase() === "post", "Removal uses POST")
       assert(options.body instanceof URLSearchParams, "Removal sends a form body")
@@ -171,6 +187,7 @@ window.fetch = async (input, options) => {
 }
 localStorage.removeItem("ruricon:icon-view:v1")
 localStorage.removeItem("ruricon:preset-favorites:v1")
+localStorage.removeItem("ruricon:hidden-ad-presets:v1")
 const cleanup = mountCommentIconHook()
 const tick = async () => {
   for (let index = 0; index < 12; index++) await new Promise((resolve) => setTimeout(resolve, 0))
@@ -545,18 +562,24 @@ async function checkPresetDialog(comment: HTMLElement) {
     )
   }
   const cardTopBeforeFavorite = nativeFavoriteRow.getBoundingClientRect().top
+  const focusedFavorite = nativeFavoriteRow.querySelector<HTMLButtonElement>(
+    ".ruricon-preset-favorite",
+  )!
+  focusedFavorite.focus({ preventScroll: true })
   click(".ruricon-preset-favorite", nativeFavoriteRow)
   await tick()
   assert(
-    [...modal.querySelectorAll(".ruricon-preset-row")].every(
-      (row, index) => row === openingRows[index],
-    ),
-    "Adding a favorite keeps card order and identity",
+    modal.querySelector(".ruricon-preset-row") === nativeFavoriteRow &&
+      [...modal.querySelectorAll<HTMLElement>(".ruricon-preset-row")].every((row) =>
+        openingRows.includes(row),
+      ),
+    "Adding a favorite immediately moves its existing card first",
   )
   assert(
     list.scrollTop === scrollBeforeFavorite &&
-      nativeFavoriteRow.getBoundingClientRect().top === cardTopBeforeFavorite,
-    "Adding a favorite preserves scroll and card position",
+      document.activeElement === focusedFavorite &&
+      nativeFavoriteRow.getBoundingClientRect().top !== cardTopBeforeFavorite,
+    "Adding a favorite preserves scroll and keyboard focus while moving the card",
   )
   assert(
     JSON.parse(localStorage.getItem("ruricon:preset-favorites:v1")!).join(",") === "5033",
@@ -584,8 +607,8 @@ async function checkPresetDialog(comment: HTMLElement) {
     "Cached counts remain visible after switching presets",
   )
   assert(
-    modal.querySelector(".ruricon-preset-title")!.textContent!.includes("냥냥"),
-    "Open dialog defers favorite sorting until reopening",
+    modal.querySelector(".ruricon-preset-title")!.textContent === "Native",
+    "Open dialog updates favorite sorting immediately",
   )
   assert(
     comment.querySelector(".ruricon-preset-shortcut")?.getAttribute("data-preset-id") === "5033",
@@ -596,12 +619,12 @@ async function checkPresetDialog(comment: HTMLElement) {
   await tick()
   assert(
     modal.querySelector(".ruricon-preset-title")!.textContent!.includes("냥냥"),
-    "Removing the favorite also leaves the opening order unchanged",
+    "Removing the favorite immediately restores native relative order",
   )
   assert(
     list.scrollTop === scrollBeforeFavorite &&
       nativeFavoriteRow.getBoundingClientRect().top === cardTopBeforeFavorite,
-    "Removing a favorite preserves scroll and card position",
+    "Removing a favorite preserves scroll while returning the card to native order",
   )
   assert(
     nativeFavoriteRow.dataset.favorite === "false" &&
@@ -620,9 +643,41 @@ async function checkPresetDialog(comment: HTMLElement) {
     [...modal.querySelectorAll<HTMLElement>('.ruricon-preset-row[data-favorite="true"]')]
       .map((row) => row.querySelector(".ruricon-preset-title")!.textContent)
       .join(",") === "냥냥 (M),Native",
-    "Multiple favorite markers activate without moving cards",
+    "Multiple favorites reorder immediately with the newest first",
   )
-  click(".ruricon-preset-favorite", modal)
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:preset-favorites:v1")!).join(",") === "900,5033",
+    "Newest preset favorite is stored first",
+  )
+  assert(
+    comment.querySelector(".ruricon-preset-shortcut")!.getAttribute("data-preset-id") === "900",
+    "Picker uses the saved order within favorites",
+  )
+  const moveFirst = modal.querySelector<HTMLButtonElement>(".ruricon-preset-move-first")!
+  const protectedDelete = modal.querySelector<HTMLButtonElement>(".ruricon-preset-delete")!
+  assert(
+    !moveFirst.disabled &&
+      protectedDelete.disabled &&
+      protectedDelete.nextElementSibling === moveFirst,
+    "Move to front sits beside disabled Delete for the selected favorite",
+  )
+  click(".ruricon-preset-move-first", modal)
+  await tick()
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:preset-favorites:v1")!).join(",") === "5033,900" &&
+      moveFirst.disabled,
+    "Move to front persists the selected favorite first and disables itself",
+  )
+  assert(
+    list.scrollTop === scrollBeforeFavorite &&
+      modal.querySelector(".ruricon-preset-row") === nativeFavoriteRow,
+    "Move to front reorders the open dialog immediately while preserving scroll",
+  )
+  assert(
+    comment.querySelector(".ruricon-preset-shortcut")!.getAttribute("data-preset-id") === "5033",
+    "Picker shares the changed favorite order",
+  )
+  click(".ruricon-preset-favorite", openingRows[0])
   await tick()
   assert(
     localStorage.getItem("ruricon:icon-view:v1") === iconPreferences,
@@ -684,6 +739,21 @@ async function checkPresetDialog(comment: HTMLElement) {
     "Delete appears only in the footer",
   )
   const deleteButton = deletionDialog.querySelector<HTMLButtonElement>(".ruricon-preset-delete")!
+  assert(deleteButton.disabled, "Favorite preset cannot be deleted")
+  void act(() => {
+    deleteButton.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+  })
+  assert(removalCalls.length === 0, "Favorite protection also prevents programmatic deletion")
+  const protectedRow = deletionDialog.querySelector<HTMLElement>(
+    '.ruricon-preset-row[data-selected="true"]',
+  )!
+  click(".ruricon-preset-favorite", protectedRow)
+  await tick()
+  assert(!deleteButton.disabled, "Removing the favorite enables Delete")
+  assert(
+    !deletionDialog.querySelector(".ruricon-preset-move-first"),
+    "Non-favorite presets do not show Move to front",
+  )
   const footerButtons = [
     ...deletionDialog.querySelectorAll<HTMLButtonElement>(".ruricon-preset-footer button"),
   ].filter((button) => getComputedStyle(button).display !== "none")
@@ -704,7 +774,9 @@ async function checkPresetDialog(comment: HTMLElement) {
         ?.textContent?.includes("삭제하지 못했습니다") === true,
   )
   assert(
-    deletionDialog.querySelector(".ruricon-preset-title")!.textContent === "Native",
+    [...deletionDialog.querySelectorAll(".ruricon-preset-title")].some(
+      (title) => title.textContent === "Native",
+    ),
     "Failed removal keeps the preset in the list",
   )
   failRemovalId = null
@@ -782,7 +854,113 @@ async function checkPresetDialog(comment: HTMLElement) {
     !(await loadPresets()).some((preset) => [5033, 900, 920].includes(preset.id)),
     "Deletion invalidates cached presets and subsequent reads reflect server removals",
   )
+  const beforeHideCalls = removalCalls.length
+  const beforeHideIconPreferences = localStorage.getItem("ruricon:icon-view:v1")
+  for (const ad of ["AD1", "AD2"]) {
+    const adRow = [...deletionDialog.querySelectorAll<HTMLElement>(".ruricon-preset-row")].find(
+      (row) => row.querySelector(".ruricon-preset-title")!.textContent === ad,
+    )!
+    click(".ruricon-preset-option", adRow)
+    assert(
+      deletionDialog.querySelector(".ruricon-preset-hide")!.textContent === "숨기기" &&
+        !deletionDialog.querySelector(".ruricon-preset-delete"),
+      "Ad preset offers local Hide instead of server Delete",
+    )
+    click(".ruricon-preset-hide", deletionDialog)
+    await tick()
+    assert(
+      adRow.isConnected &&
+        adRow.dataset.hidden === "true" &&
+        getComputedStyle(adRow).borderStyle === "dashed" &&
+        Number(getComputedStyle(adRow.querySelector(".ruricon-preset-option")!).opacity) < 1,
+      "Hidden ad stays in the modal as a muted outline card",
+    )
+    assert(
+      deletionDialog.querySelector(".ruricon-preset-hide")!.textContent === "복원" &&
+        deletionDialog.querySelector<HTMLButtonElement>(".ruricon-preset-apply")!.disabled,
+      "Hidden selection offers Restore and cannot be applied",
+    )
+  }
+  assert(removalCalls.length === beforeHideCalls, "Hiding ads never calls the removal API")
+  assert(
+    localStorage.getItem("ruricon:icon-view:v1") === beforeHideIconPreferences,
+    "Hiding ads does not change icon favorites or history",
+  )
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:hidden-ad-presets:v1")!).sort().join(",") ===
+      "1917,3213",
+    "Hidden ads persist in separate local storage",
+  )
+  assert(
+    !comment.querySelector('[data-preset-id="1917"], [data-preset-id="3213"]'),
+    "Hidden ads disappear from Picker shortcuts",
+  )
+  assert(
+    (await loadPresets()).some((preset) => preset.id === 1917),
+    "Hidden ads remain in the backend result",
+  )
   void act(unmount)
+  const adPreferences = JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!)
+  adPreferences.presetId = 1917
+  localStorage.setItem("ruricon:icon-view:v1", JSON.stringify(adPreferences))
+  // Ignore malformed entries without hiding ordinary presets.
+  localStorage.setItem(
+    "ruricon:hidden-ad-presets:v1",
+    JSON.stringify([1917, 3213, 940, "1917", null]),
+  )
+  const unmountHidden = mountCommentIconHook()
+  click("button[onclick]", comment)
+  await tick()
+  assert(
+    !comment.querySelector('[data-preset-id="1917"], [data-preset-id="3213"]') &&
+      comment.querySelector('[data-preset-id="940"]'),
+    "Remount restores hidden ads and rejects non-ad IDs",
+  )
+  assert(
+    !comment.querySelector(".ruricon-preset-select")!.textContent!.includes("AD1"),
+    "A saved hidden ad selection falls back to an available preset",
+  )
+  click(".ruricon-preset-select", comment)
+  await tick()
+  assert(
+    document.querySelectorAll('.ruricon-preset-row[data-hidden="true"]').length === 2,
+    "Hidden ads remain available for restoring on the next modal opening",
+  )
+  const restoreDialog = document.querySelector<HTMLDialogElement>("dialog")!
+  const restoreRow = [...restoreDialog.querySelectorAll<HTMLElement>(".ruricon-preset-row")].find(
+    (row) => row.querySelector(".ruricon-preset-title")!.textContent === "AD1",
+  )!
+  click(".ruricon-preset-option", restoreRow)
+  assert(
+    restoreDialog.querySelector(".ruricon-preset-hide")!.textContent === "복원",
+    "Muted card remains selectable for restoring",
+  )
+  click(".ruricon-preset-hide", restoreDialog)
+  await tick()
+  assert(
+    restoreRow.dataset.hidden === "false" &&
+      getComputedStyle(restoreRow).borderStyle === "solid" &&
+      restoreDialog.querySelector(".ruricon-preset-hide")!.textContent === "숨기기",
+    "Restore reactivates the card and returns the action to Hide",
+  )
+  assert(
+    !restoreDialog.querySelector<HTMLButtonElement>(".ruricon-preset-apply")!.disabled &&
+      comment.querySelector('[data-preset-id="1917"]'),
+    "Restored ad can be applied and returns to Picker",
+  )
+  assert(
+    JSON.parse(localStorage.getItem("ruricon:hidden-ad-presets:v1")!).join(",") === "3213" &&
+      removalCalls.length === beforeHideCalls,
+    "Restore changes only local hidden state without backend deletion",
+  )
+  click(".ruricon-preset-hide", restoreDialog)
+  await tick()
+  assert(
+    restoreRow.getAttribute("data-hidden") === "true" &&
+      !comment.querySelector('[data-preset-id="1917"]'),
+    "Restored card can be hidden again",
+  )
+  void act(unmountHidden)
 }
 async function checkInitialShortcutPage() {
   const comment = document.querySelector<HTMLElement>("#comment")!
@@ -918,6 +1096,94 @@ async function check() {
   click("button[onclick]", comment)
   await tick()
   assert(nativeCalls === 0, "Capture stops native inline handlers")
+  if (location.search === "?image-preset") {
+    const manage = comment.querySelector<HTMLAnchorElement>(".ruricon-preset-manage")!
+    assert(
+      manage.parentElement?.classList.contains("ruricon-icon-actions") &&
+        !manage.parentElement.hidden &&
+        !comment.querySelector(".ruricon-preset-controls"),
+      "Management link sits in the visible icon actions and leaves the preset selector unchanged",
+    )
+    assert(
+      manage.href ===
+        `https://${location.hostname === "m.ruliweb.com" ? "m" : "bbs"}.ruliweb.com/member/mypage/comment_icon_setting` &&
+        manage.target === "_blank" &&
+        manage.rel.includes("noopener") &&
+        manage.querySelector("svg"),
+      "Native preset management uses the site domain and opens safely in a new window",
+    )
+    assert(
+      getComputedStyle(manage).borderRadius ===
+        getComputedStyle(comment.querySelector(".ruricon-preset-select")!).borderRadius,
+      "Management link uses the button design",
+    )
+    const storageTab = '.ruricon-icon-tabs button[aria-label="개인 저장소"]'
+    const images = () => [...comment.querySelectorAll<HTMLImageElement>(".ruricon-icon-grid img")]
+    const status = () => comment.querySelector('[role="status"]')!.textContent!
+    const retry = () => click(".ruricon-icon-view > button:not([hidden]):last-of-type", comment)
+    const openStorage = async () => {
+      click(storageTab, comment)
+      await tick()
+    }
+    assert(!requests.some((url) => url.includes("type=preset")), "Storage loads only on demand")
+    await openStorage()
+    assert(images().length === 48, "Storage renders 48 images without pagination")
+    assert(comment.querySelector<HTMLElement>(".ruricon-icon-pages")!.hidden, "Storage hides pages")
+    assert(images()[0].src === source(999, 0), "Storage preserves image URLs and order")
+    click(".ruricon-icon-insert", comment)
+    await tick()
+    assert(
+      comment.querySelector<HTMLImageElement>(".icon_preview")!.src === source(999, 0),
+      "Storage inserts into the owning comment",
+    )
+    assert(
+      JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).recent[0] === source(999, 0),
+      "Storage insertion records recent use",
+    )
+    click(".ruricon-icon-star", comment)
+    assert(
+      JSON.parse(localStorage.getItem("ruricon:icon-view:v1")!).favorites.includes(source(999, 0)),
+      "Storage supports local favorites",
+    )
+    storageCount = 0
+    await openStorage()
+    assert(
+      !images().length && comment.querySelector(".ruricon-icon-empty"),
+      "Empty storage shows the empty state",
+    )
+    storageCount = 49
+    await openStorage()
+    assert(images().length === 48, "Storage displays at most 48 images")
+    storageSuccess = false
+    await openStorage()
+    assert(status().includes("개인 저장소를 불러오지 못했습니다."), "API failure is shown")
+    storageSuccess = true
+    storageCount = 1
+    retry()
+    await tick()
+    assert(images().length === 1 && !status(), "Retry reloads storage")
+    storageStatus = 503
+    await openStorage()
+    assert(status().includes("503"), "HTTP failure is shown")
+    storageStatus = 200
+    holdStorage = true
+    await openStorage()
+    assert(releaseStorage, "Storage request is pending")
+    click('.ruricon-icon-tabs button[aria-label="즐겨찾기"]', comment)
+    releaseStorage()
+    await tick()
+    assert(
+      comment.querySelector(storageTab)!.getAttribute("aria-pressed") === "false" && !status(),
+      "Late storage response does not change another tab",
+    )
+    click('.ruricon-icon-tabs button[aria-label="전체"]', comment)
+    assert(images().length === 96, "Returning to All preserves the selected collection")
+    void act(cleanup)
+    result.textContent =
+      "PASS: personal storage 0–48 images, insertion, favorites/recent, errors, retry and tab races"
+    result.dataset.result = "PASS"
+    return
+  }
   if (location.search === "?preset-dialog") {
     await checkPresetDialog(comment)
     result.textContent =

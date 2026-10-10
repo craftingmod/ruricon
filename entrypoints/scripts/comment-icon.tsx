@@ -5,6 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  ExternalLinkIcon,
+  Images,
   List,
   Pencil,
   PencilOff,
@@ -26,6 +28,7 @@ import {
 import { cx } from "../lib/cx.ts"
 import {
   loadCollection,
+  fixedAdPresetIds,
   loadNativePage,
   loadPresets,
   orderPresets,
@@ -33,11 +36,12 @@ import {
   type IconCollection,
   type Preset,
 } from "../lib/icon-view.ts"
-import { mobileDomain } from "../lib/ruli-constants.ts"
+import { mobileDomain, pcDomain } from "../lib/ruli-constants.ts"
+import { readIconStoage } from "../lib/ruli-utils.ts"
 
 import "./comment-icon.css"
 
-type Mode = "all" | "favorites" | "recent"
+type Mode = "all" | "favorites" | "recent" | "imagePreset"
 type Saved = {
   presetId: number | null
   favorites: string[]
@@ -49,6 +53,7 @@ type UpdateSaved = (update: (current: Saved) => Saved) => void
 type AppHandle = { open: (container: HTMLElement) => void }
 const storageKey = "ruricon:icon-view:v1"
 const presetFavoritesKey = "ruricon:preset-favorites:v1"
+const hiddenAdPresetsKey = "ruricon:hidden-ad-presets:v1"
 const localIconLimit = 1000
 const appRef = createRef<AppHandle>()
 const ownedContainers = new Set<HTMLElement>()
@@ -98,6 +103,15 @@ function readPresetFavorites(): number[] {
   }
 }
 
+function readHiddenAdPresets(): number[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(hiddenAdPresetsKey) ?? "null")
+    return fixedAdPresetIds.filter((id) => Array.isArray(value) && value.includes(id))
+  } catch {
+    return []
+  }
+}
+
 function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   const [views, setViews] = useState<{ container: HTMLElement; visible: boolean }[]>([])
   const [saved, setSaved] = useState(readPreferences)
@@ -105,8 +119,11 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   const [storageError, setStorageError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [removedPresetIds, setRemovedPresetIds] = useState<number[]>([])
+  const [hiddenAdPresets, setHiddenAdPresets] = useState(readHiddenAdPresets)
+  const excludedPresetIds = [...removedPresetIds, ...hiddenAdPresets]
   const persisted = useRef(saved)
   const persistedPresetFavorites = useRef(presetFavorites)
+  const persistedHiddenAdPresets = useRef(hiddenAdPresets)
 
   useImperativeHandle(
     ref,
@@ -125,7 +142,12 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
   )
 
   useLayoutEffect(() => {
-    if (persisted.current === saved && persistedPresetFavorites.current === presetFavorites) return
+    if (
+      persisted.current === saved &&
+      persistedPresetFavorites.current === presetFavorites &&
+      persistedHiddenAdPresets.current === hiddenAdPresets
+    )
+      return
     try {
       if (persisted.current !== saved) {
         persisted.current = saved
@@ -135,11 +157,15 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
         persistedPresetFavorites.current = presetFavorites
         localStorage.setItem(presetFavoritesKey, JSON.stringify(presetFavorites))
       }
+      if (persistedHiddenAdPresets.current !== hiddenAdPresets) {
+        persistedHiddenAdPresets.current = hiddenAdPresets
+        localStorage.setItem(hiddenAdPresetsKey, JSON.stringify(hiddenAdPresets))
+      }
       setStorageError(null)
     } catch {
       setStorageError("사용 기록을 저장할 수 없습니다. 현재 화면에서는 유지됩니다.")
     }
-  }, [saved, presetFavorites])
+  }, [saved, presetFavorites, hiddenAdPresets])
 
   return (
     <>
@@ -149,7 +175,7 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
           {...view}
           saved={saved}
           presetFavorites={presetFavorites}
-          removedPresetIds={removedPresetIds}
+          removedPresetIds={excludedPresetIds}
           updateSaved={setSaved}
           storageError={storageError}
           choosePreset={(request) => setDialog({ ...request, open: true })}
@@ -160,6 +186,15 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
           request={dialog}
           presetFavorites={presetFavorites}
           removedPresetIds={removedPresetIds}
+          hiddenPresetIds={hiddenAdPresets}
+          toggleHiddenPreset={(id) => {
+            if (fixedAdPresetIds.includes(id))
+              setHiddenAdPresets((current) =>
+                current.includes(id)
+                  ? current.filter((hiddenId) => hiddenId !== id)
+                  : [...current, id],
+              )
+          }}
           removePreset={async (preset) => {
             await removePresetFavorites(preset)
             setRemovedPresetIds((current) => [...current, preset.id])
@@ -171,7 +206,14 @@ function CommentIconApp({ ref }: { ref: Ref<AppHandle> }) {
             setPresetFavorites((current) =>
               current.includes(id)
                 ? current.filter((favoriteId) => favoriteId !== id)
-                : [...current, id],
+                : [id, ...current],
+            )
+          }
+          moveFavoriteToFront={(id) =>
+            setPresetFavorites((current) =>
+              !current.includes(id) || current[0] === id
+                ? current
+                : [id, ...current.filter((favoriteId) => favoriteId !== id)],
             )
           }
           storageError={storageError}
@@ -417,6 +459,7 @@ function IconView({
   const [selected, setSelected] = useState<Preset | null>(null)
   const [collection, setCollection] = useState<IconCollection | null>(null)
   const [mode, setMode] = useState<Mode>("all")
+  const [imagePreset, setImagePreset] = useState<string[]>([])
   const { editMode } = saved
   const [selection, setSelection] = useState(new Set<string>())
   const selectionMode = mode === "favorites" && editMode
@@ -435,7 +478,8 @@ function IconView({
   const pages = useRef<HTMLElement>(null)
   const select = useRef<HTMLButtonElement>(null)
   const reorderedFocus = useRef<HTMLElement | null>(null)
-  const local = mode === "favorites" ? saved.favorites : saved.recent
+  const local =
+    mode === "imagePreset" ? imagePreset : mode === "favorites" ? saved.favorites : saved.recent
   const total = mode === "all" ? (collection?.pages[0]?.total ?? 0) : local.length
   const pageCount =
     mode !== "all"
@@ -580,9 +624,10 @@ function IconView({
       (result) => {
         setPresets(result)
         setReady(true)
+        const available = result.filter((preset) => !removedPresetIds.includes(preset.id))
         initial =
-          result.find((preset) => preset.id === saved.presetId) ??
-          orderPresets(result, presetFavorites)[0]
+          available.find((preset) => preset.id === saved.presetId) ??
+          orderPresets(available, presetFavorites)[0]
       },
       initialize,
     )
@@ -594,7 +639,21 @@ function IconView({
     setMode(next)
     setPageIndex(0)
     setLoading({ busy: false, message: "", retry: null })
+    if (next === "imagePreset") void loadImagePreset()
     if (next === "all" && selected && !collection) void selectPreset(selected)
+  }
+
+  async function loadImagePreset() {
+    setImagePreset([])
+    await request(
+      async () => {
+        const result = await readIconStoage()
+        if (!result.success) throw new Error("개인 저장소를 불러오지 못했습니다.")
+        return result.icons.slice(0, 48)
+      },
+      setImagePreset,
+      loadImagePreset,
+    )
   }
 
   function preserveReorderFocus() {
@@ -701,7 +760,7 @@ function IconView({
         disabled={!ready}
         onClick={() =>
           choosePreset({
-            presets,
+            presets: loadedPresets,
             selected: selected?.id ?? null,
             opener: select.current!,
             choose: (preset) => {
@@ -734,6 +793,7 @@ function IconView({
               ["all", "전체"],
               ["favorites", "즐겨찾기"],
               ["recent", "최근 사용"],
+              ["imagePreset", "개인 저장소"],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -751,6 +811,8 @@ function IconView({
                 <Clock3 size={18} aria-hidden="true" focusable="false" />
               ) : value === "all" ? (
                 <List size={18} aria-hidden="true" focusable="false" />
+              ) : value === "imagePreset" ? (
+                <Images size={18} aria-hidden="true" focusable="false" />
               ) : (
                 label
               )}
@@ -780,7 +842,7 @@ function IconView({
             )
           })}
         </nav>
-        <div class="ruricon-icon-actions" hidden={mode === "all"}>
+        <div class="ruricon-icon-actions">
           <button
             type="button"
             class={cx("ruricon-icon-action", "ruricon-icon-edit-mode")}
@@ -830,6 +892,18 @@ function IconView({
             )}
             고정
           </button>
+          <a
+            class={cx("ruricon-icon-action", "ruricon-preset-manage")}
+            href={`https://${location.hostname === mobileDomain ? mobileDomain : pcDomain}/member/mypage/comment_icon_setting`}
+            hidden={mode !== "imagePreset"}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="프리셋 관리 (새 창)"
+            title="프리셋 관리 (새 창)"
+          >
+            <ExternalLinkIcon size={16} aria-hidden="true" focusable="false" />
+            프리셋 관리
+          </a>
         </div>
       </div>
       <div role="status">{[loading.message, storageError].filter(Boolean).join(" ")}</div>

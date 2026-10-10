@@ -8,7 +8,9 @@ export const iconBoardId = 98
 const iconApi = `https://${apiDomain}/comment_icon`
 export const iconListUrl = `${iconApi}?&more=0&type=first`
 
-export const iconImagesUrl = `https://${apiDomain}/comment_icon?&more=0&type=first`
+export const iconImagesUrl = `${iconApi}?&more=0&type=first`
+
+export const iconStorageUrl = `${iconApi}?&more=0&type=preset`
 
 export const removeFavorIconUrl = `https://${apiDomain}/comment_icon_pick_remove`
 

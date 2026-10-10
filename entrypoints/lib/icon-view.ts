@@ -22,10 +22,13 @@ export type IconPage = {
   total: number
 }
 export type IconCollection = { title: string; pages: IconPage[]; nativeId: number | null }
+export const fixedAdPresetIds = [1917, 3213]
 
 export function orderPresets(presets: Preset[], favorites: number[]) {
-  const favoriteIds = new Set(favorites)
-  return [...presets].sort((a, b) => Number(favoriteIds.has(b.id)) - Number(favoriteIds.has(a.id)))
+  const positions = new Map(favorites.map((id, index) => [id, index]))
+  return [...presets].sort(
+    (a, b) => (positions.get(a.id) ?? favorites.length) - (positions.get(b.id) ?? favorites.length),
+  )
 }
 
 const requests = new Map<string, { expires: number; promise: Promise<unknown>; value?: unknown }>()

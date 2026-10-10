@@ -17,6 +17,7 @@
   --ruricon-icon-size: 70px;
 }
 .ruricon-icon-view button,
+.ruricon-preset-manage,
 .ruricon-preset-dialog button,
 .ruricon-preset-dialog input {
   box-sizing: border-box;
@@ -24,6 +25,7 @@
   color: inherit;
 }
 .ruricon-icon-view button,
+.ruricon-preset-manage,
 .ruricon-preset-dialog button {
   min-height: 44px;
   border: 1px solid #aaa6;
@@ -36,6 +38,7 @@
   cursor: default;
 }
 .ruricon-icon-view button:focus-visible,
+.ruricon-preset-manage:focus-visible,
 .ruricon-preset-dialog :focus-visible {
   outline: 2px solid #467ac8;
   outline-offset: 2px;
@@ -44,6 +47,12 @@
 .ruricon-preset-dialog [aria-current="true"] {
   background: #467ac822;
   border-color: #467ac8;
+}
+.ruricon-preset-manage {
+  text-decoration: none;
+}
+.ruricon-preset-manage:hover {
+  background: #8882;
 }
 .ruricon-preset-select {
   display: flex;

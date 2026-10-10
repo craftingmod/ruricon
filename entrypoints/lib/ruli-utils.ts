@@ -4,6 +4,7 @@ import {
   getIconImagesUrl,
   getViewUrl,
   iconListUrl,
+  iconStorageUrl,
   removeFavorIconUrl,
 } from "./ruli-constants.ts"
 
@@ -351,6 +352,41 @@ export async function readIconImages(iconId: number, offset = 0, limit = 100) {
     title,
     realIconId,
     icons: iconSrc,
+  }
+}
+
+/**
+ * Read personal icons from private storage by user
+ *
+ * Limited to 48 images, image index is different from real index
+ * So do not care about index
+ * @returns json with image_url[]
+ */
+export async function readIconStoage() {
+  const json = await requestGet<{
+    success: boolean
+    html: string
+  }>(iconStorageUrl)
+
+  const parser = new DOMParser()
+  const $ = parser.parseFromString(json.html, "text/html")
+
+  if (!json.success) {
+    return {
+      success: false,
+      icons: [],
+    }
+  }
+
+  const iconElements = Array.from(
+    $.body.querySelectorAll<HTMLImageElement>(":scope > div:last-of-type > div:only-of-type > img"),
+  )
+    .map((img) => img.getAttribute("src"))
+    .filter((v) => v != null)
+
+  return {
+    success: true,
+    icons: iconElements,
   }
 }
 

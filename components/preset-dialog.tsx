@@ -1,7 +1,13 @@
-import { Check, Star, X } from "lucide-preact"
+import { ArrowUpToLine, Check, Star, X } from "lucide-preact"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
-import { getCachedImageCount, loadCollection, type Preset } from "../entrypoints/lib/icon-view.ts"
+import {
+  fixedAdPresetIds,
+  getCachedImageCount,
+  loadCollection,
+  orderPresets,
+  type Preset,
+} from "../entrypoints/lib/icon-view.ts"
 import { matchesPreset } from "../entrypoints/lib/preset-search.ts"
 import { getViewUrl, iconBoardId, mobileDomain } from "../entrypoints/lib/ruli-constants.ts"
 
@@ -43,17 +49,23 @@ export function PresetDialog({
   dismiss,
   presetFavorites,
   toggleFavorite,
+  moveFavoriteToFront,
   storageError,
   removedPresetIds,
   removePreset,
+  hiddenPresetIds,
+  toggleHiddenPreset,
 }: {
   request: DialogState
   dismiss: () => void
   presetFavorites: number[]
   toggleFavorite: (id: number) => void
+  moveFavoriteToFront: (id: number) => void
   storageError: string | null
   removedPresetIds: number[]
   removePreset: (preset: Preset) => Promise<void>
+  hiddenPresetIds: number[]
+  toggleHiddenPreset: (id: number) => void
 }) {
   const [query, setQuery] = useState("")
   const [previewVisible, setPreviewVisible] = useState(false)
@@ -70,13 +82,40 @@ export function PresetDialog({
   const deletePending = useRef(false)
   const modal = useRef<HTMLDialogElement>(null)
   const search = useRef<HTMLInputElement>(null)
-  // Keep the opening order until the next dialog request.
-  const presets = request.presets.filter((preset) => !removedPresetIds.includes(preset.id))
+  const list = useRef<HTMLDivElement>(null)
+  const scrollToRestore = useRef<number | null>(null)
+  const focusToRestore = useRef<HTMLElement | null>(null)
+  const presets = orderPresets(
+    request.presets.filter((preset) => !removedPresetIds.includes(preset.id)),
+    presetFavorites,
+  )
   const filtered = presets.filter((preset) => matchesPreset(preset.title, query))
   const selected = presets.find((preset) => preset.id === selectedId)
+  const selectedIsAd = selected !== undefined && fixedAdPresetIds.includes(selected.id)
+  const selectedIsHidden = selected !== undefined && hiddenPresetIds.includes(selected.id)
+  const selectedIsFavorite = selected !== undefined && presetFavorites.includes(selected.id)
   const currentPreview = preview?.id === selectedId ? preview : null
   const articleUrl = (preset: Preset) =>
     getViewUrl(iconBoardId, preset.mainId ?? preset.id, location.hostname === mobileDomain)
+
+  function preserveListScroll(action: () => void) {
+    scrollToRestore.current = list.current!.scrollTop
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && list.current!.contains(focused)) {
+      // Moving a focused card can scroll it into view.
+      focusToRestore.current = focused
+      focused.blur()
+    }
+    action()
+  }
+
+  useLayoutEffect(() => {
+    if (scrollToRestore.current === null) return
+    list.current!.scrollTop = scrollToRestore.current
+    focusToRestore.current?.focus({ preventScroll: true })
+    scrollToRestore.current = null
+    focusToRestore.current = null
+  }, [presetFavorites])
 
   useLayoutEffect(() => {
     if (!request.open) return
@@ -128,11 +167,14 @@ export function PresetDialog({
   }, [request.open, selected, retry])
 
   async function deleteSelected() {
-    if (
-      !selected ||
-      deletePending.current ||
-      !window.confirm(`「${selected.title}」를 루리웹 아이콘팩 즐겨찾기에서 삭제하시겠습니까?`)
-    )
+    if (!selected || deletePending.current) return
+    if (selectedIsAd) {
+      toggleHiddenPreset(selected.id)
+      setDeleteError("")
+      return
+    }
+    if (selectedIsFavorite) return
+    if (!window.confirm(`「${selected.title}」를 루리웹 아이콘팩 즐겨찾기에서 삭제하시겠습니까?`))
       return
     deletePending.current = true
     setDeleting(true)
@@ -199,7 +241,7 @@ export function PresetDialog({
             <span>내 프리셋</span>
             <span>즐겨찾기 우선</span>
           </div>
-          <div class="ruricon-preset-list">
+          <div ref={list} class="ruricon-preset-list">
             {filtered.map((preset) => {
               const imageCount = getCachedImageCount(preset) ?? preset.imageCount
               return (
@@ -208,11 +250,12 @@ export function PresetDialog({
                   class="ruricon-preset-row"
                   data-selected={String(preset.id === selectedId)}
                   data-favorite={String(presetFavorites.includes(preset.id))}
+                  data-hidden={String(hiddenPresetIds.includes(preset.id))}
                 >
                   <button
                     type="button"
                     class="ruricon-preset-option"
-                    aria-label={`${preset.title} 선택`}
+                    aria-label={`${preset.title}${hiddenPresetIds.includes(preset.id) ? " (숨김)" : ""} 선택`}
                     aria-pressed={preset.id === selectedId}
                     disabled={deleting}
                     onClick={() => setSelectedId(preset.id)}
@@ -223,6 +266,9 @@ export function PresetDialog({
                       <span class="ruricon-preset-count">
                         {imageCount === undefined ? null : `${imageCount}개`}
                       </span>
+                      {hiddenPresetIds.includes(preset.id) && (
+                        <span class="ruricon-preset-hidden-label">숨김</span>
+                      )}
                     </span>
                     {preset.id === selectedId && <Check size={18} aria-hidden="true" />}
                   </button>
@@ -233,7 +279,7 @@ export function PresetDialog({
                     title="프리셋 즐겨찾기"
                     aria-pressed={presetFavorites.includes(preset.id)}
                     disabled={deleting}
-                    onClick={() => toggleFavorite(preset.id)}
+                    onClick={() => preserveListScroll(() => toggleFavorite(preset.id))}
                   >
                     <Star
                       size={18}
@@ -300,14 +346,35 @@ export function PresetDialog({
         </section>
       </div>
       <footer class="ruricon-preset-footer">
-        <button
-          type="button"
-          class="ruricon-preset-delete"
-          disabled={!selected || deleting}
-          onClick={() => void deleteSelected()}
-        >
-          삭제
-        </button>
+        <div class="ruricon-preset-footer-actions">
+          <button
+            type="button"
+            class={selectedIsAd ? "ruricon-preset-hide" : "ruricon-preset-delete"}
+            title={
+              selectedIsAd
+                ? `광고 프리셋을 이 브라우저에서 ${selectedIsHidden ? "복원" : "숨기기"}`
+                : selectedIsFavorite
+                  ? "즐겨찾기를 해제한 후 삭제할 수 있습니다."
+                  : undefined
+            }
+            disabled={!selected || deleting || (!selectedIsAd && selectedIsFavorite)}
+            onClick={() => void deleteSelected()}
+          >
+            {selectedIsAd ? (selectedIsHidden ? "복원" : "숨기기") : "삭제"}
+          </button>
+          {selectedIsFavorite && (
+            <button
+              type="button"
+              class="ruricon-preset-move-first"
+              disabled={deleting || presetFavorites[0] === selected?.id}
+              onClick={() => {
+                if (selected) preserveListScroll(() => moveFavoriteToFront(selected.id))
+              }}
+            >
+              <ArrowUpToLine size={16} aria-hidden="true" />맨 앞으로
+            </button>
+          )}
+        </div>
         {(deleteError || storageError) && <span role="status">{deleteError || storageError}</span>}
         <button type="button" class="ruricon-preset-cancel" disabled={deleting} onClick={dismiss}>
           취소
@@ -326,9 +393,9 @@ export function PresetDialog({
         <button
           type="button"
           class="ruricon-preset-apply"
-          disabled={!selected || deleting}
+          disabled={!selected || selectedIsHidden || deleting}
           onClick={() => {
-            if (selected) {
+            if (selected && !selectedIsHidden) {
               dismiss()
               request.choose(selected)
             }
