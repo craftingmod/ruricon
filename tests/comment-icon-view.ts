@@ -1,6 +1,7 @@
 import { act } from "preact/test-utils"
 
 import { compileMain } from "../entrypoints/lib/editor/articleMeta.ts"
+import { iconCacheTTL } from "../entrypoints/lib/icon-cache.ts"
 import {
   getCachedImageCount,
   loadCollection,
@@ -19,7 +20,7 @@ const iconSize = location.hostname === "m.ruliweb.com" ? 70 : 100
 const source = (id: number, index: number) =>
   `https://example.com/${id}/${index}.${id === 5033 && index === 1 ? "mp4" : "png"}?icon=${id}`
 const nativeSource = (id: number, index: number) => source(id, index).split("?")[0]
-let failSecondPage = true
+let failSecondPage = false
 let releaseSlow: (() => void) | null = null
 let releaseInsert: (() => void) | null = null
 let storageCount = 48
@@ -246,10 +247,10 @@ async function checkPresetDialog(comment: HTMLElement) {
   assert(getCachedImageCount(uncached) === undefined, "Missing cache has no count")
   const originalNow = Date.now
   try {
-    Date.now = () => originalNow() + 60_001
+    Date.now = () => originalNow() + iconCacheTTL + 1
     assert(
-      getCachedImageCount(native) === undefined && getCachedImageCount(master) === undefined,
-      "Expired caches do not provide counts",
+      getCachedImageCount(native) === 205 && getCachedImageCount(master) === 97,
+      "Expired cache counts remain available as previous source",
     )
   } finally {
     Date.now = originalNow
@@ -1561,18 +1562,24 @@ async function check() {
     comment.querySelectorAll('.ruricon-icon-pages button:not([aria-label="Test"])').length === 3,
     "Native page count",
   )
+  failSecondPage = true
+  const beforeRefresh = Date.now
+  Date.now = () => beforeRefresh() + iconCacheTTL + 1
   click(".ruricon-icon-pages button:nth-child(2)", comment)
   await tick()
+  Date.now = beforeRefresh
   assert(scrollingGrid.scrollTop === 0, "Changing icon pages still resets grid scroll")
   assert(comment.querySelector('[role="status"]')!.textContent!.includes("503"), "Failure visible")
   const retry = [...comment.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "다시 시도",
   )!
+  Date.now = () => beforeRefresh() + iconCacheTTL + 1
   void act(() => retry.click())
   await tick()
+  Date.now = beforeRefresh
   assert(
     comment.querySelectorAll(".ruricon-icon-grid img").length === 100,
-    "Retry loads offset page without header",
+    "Retry refreshes the full iconId and renders its offset page",
   )
   assert(
     comment.querySelector<HTMLImageElement>(".ruricon-icon-grid img")!.src ===
@@ -1854,25 +1861,12 @@ async function check() {
   const beforeNewPage = requests.length
   await Promise.all([loadNativePage(960, 0), loadNativePage(960, 0)])
   assert(requests.length === beforeNewPage + 1, "Concurrent requests share one fetch")
-  const deduplicated = await loadNativePage(970, 0)
+  const nativeCollection = await loadNativePage(970, 0)
   assert(
-    deduplicated.images.join(",") ===
-      [nativeSource(970, 0), `${nativeSource(970, 1)}?size=large#preview`].join(","),
-    "Native URLs remove icon, preserve other parameters and fragments, and deduplicate in order",
-  )
-  assert(
-    deduplicated.nextOffset === 100 && deduplicated.total === 205,
-    "Deduplication preserves the server offset and total",
-  )
-  const nextPage = await loadNativePage(970, deduplicated.nextOffset)
-  assert(
-    nextPage.number === 2 && nextPage.nextOffset === 200 && nextPage.images.length === 2,
-    "Next page uses the server offset independently of the unique image count",
-  )
-  const lastPage = await loadNativePage(970, nextPage.nextOffset)
-  assert(
-    lastPage.nextOffset === null && lastPage.total === 205,
-    "Last page keeps server pagination",
+    nativeCollection.total === 9 &&
+      nativeCollection.nextOffset === null &&
+      nativeCollection.images.length === 9,
+    "Virtual pages are derived from the complete iconId image array, preserving raw URLs",
   )
   await loadNativePage(5033, 200)
   await readIconImages(5033, 200)

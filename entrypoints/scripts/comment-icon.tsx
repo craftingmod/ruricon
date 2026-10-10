@@ -36,6 +36,7 @@ import {
   orderPresets,
   removePresetFavorites,
   type IconCollection,
+  type IconPage,
   type Preset,
 } from "../lib/icon-view.ts"
 import { mobileDomain, pcDomain } from "../lib/ruli-constants.ts"
@@ -594,14 +595,16 @@ function IconView({
   }, [requestedMode, ready, loading.busy])
 
   async function request<T>(
-    action: () => Promise<T>,
+    action: (previous: (result: T) => void) => Promise<T>,
     apply: (result: T) => void,
     again: () => Promise<void>,
   ): Promise<boolean> {
     const token = ++revision.current
     setLoading({ busy: true, message: "불러오는 중…", retry: null })
     try {
-      const result = await action()
+      const result = await action((previous) => {
+        if (alive.current && token === revision.current) apply(previous)
+      })
       if (!alive.current || token !== revision.current) return false
       apply(result)
       setLoading({ busy: false, message: "", retry: null })
@@ -624,8 +627,8 @@ function IconView({
     setPageIndex(0)
     setCollection(null)
     setNativePages(new Map())
-    await request(
-      () => loadCollection(preset),
+    await request<IconCollection>(
+      (previous) => loadCollection(preset, previous),
       (result) => {
         const loaded = { ...preset, imageCount: result.pages[0]?.total ?? 0 }
         setCollection(result)
@@ -641,16 +644,21 @@ function IconView({
   async function changePage(next: number) {
     setTestPage(false)
     setPageIndex(next)
-    if (mode !== "all" || !collection?.nativeId || nativePages.has(next)) {
+    if (mode !== "all" || !collection?.nativeId) {
       revision.current++
       setLoading({ busy: false, message: "", retry: null })
       return
     }
     const id = collection.nativeId
-    await request(
-      () => loadNativePage(id, next * 100),
+    await request<IconPage>(
+      (previous) => loadNativePage(id, next * 100, previous),
       (result) => {
         setNativePages((current) => new Map(current).set(next, result.images))
+        setCollection((current) =>
+          current && current.nativeId === id
+            ? { ...current, pages: current.pages.map((page) => ({ ...page, total: result.total })) }
+            : current,
+        )
       },
       () => changePage(next),
     )
@@ -660,7 +668,11 @@ function IconView({
     if (!selected) return
     setTestPage(true)
     setTestImages([])
-    await request(() => loadAllIconImages(selected), setTestImages, openTestPage)
+    await request<string[]>(
+      (previous) => loadAllIconImages(selected, previous),
+      setTestImages,
+      openTestPage,
+    )
   }
 
   async function initialize() {

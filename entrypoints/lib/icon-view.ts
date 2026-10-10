@@ -1,4 +1,5 @@
-import { readMain } from "./editor/articleMeta.ts"
+import { readMain, validateState } from "./editor/articleMeta.ts"
+import { loadIconCache, readIconCache } from "./icon-cache.ts"
 import { iconBoardId, mobileDomain } from "./ruli-constants.ts"
 import {
   readArticle,
@@ -50,15 +51,10 @@ function cached<T>(key: string, request: () => Promise<T>): Promise<T> {
   return promise
 }
 
-function cachedValue<T>(key: string): T | undefined {
-  const entry = requests.get(key)
-  return entry && entry.expires > Date.now() ? (entry.value as T | undefined) : undefined
-}
+const imageCounts = new Map<number, number>()
 
 export function getCachedImageCount(preset: Preset): number | undefined {
-  const collection = cachedValue<IconCollection>(`collection:${preset.id}`)
-  if (collection) return collection.pages[0]?.total ?? 0
-  return preset.mainId === null ? cachedValue<IconPage>(`native:${preset.id}:0`)?.total : undefined
+  return imageCounts.get(preset.id)
 }
 
 export function loadPresets() {
@@ -100,26 +96,30 @@ export async function removePresetFavorites(preset: Preset) {
   }
 }
 
-export function loadNativePage(id: number, offset: number): Promise<IconPage> {
-  return cached(`native:${id}:${offset}`, async () => {
-    const result = await readIconImages(id, offset, 100)
-    if (
-      !Number.isSafeInteger(result.total_count) ||
-      result.total_count < 0 ||
-      typeof result.hasMore !== "boolean"
-    ) {
-      throw new Error("아이콘 페이지 정보를 확인해주세요.")
-    }
-    if (
-      result.hasMore &&
-      (!Number.isSafeInteger(result.nextOffset) || result.nextOffset <= offset)
-    ) {
-      throw new Error("다음 페이지 위치를 확인할 수 없습니다.")
-    }
-    if (result.icons.some((src) => !/^https?:\/\//i.test(src) || !URL.canParse(src))) {
-      throw new Error("아이콘 주소를 확인해주세요.")
-    }
-    /*
+const nativeKey = (id: number) => `icon:${id}`
+function validateImages(value: unknown): asserts value is string[] {
+  if (
+    !Array.isArray(value) ||
+    value.some((src) => typeof src !== "string" || !/^https?:\/\//i.test(src) || !URL.canParse(src))
+  )
+    throw new Error("아이콘 캐시 형식을 확인해주세요.")
+}
+async function fetchNativePage(id: number, offset: number): Promise<IconPage> {
+  const result = await readIconImages(id, offset, 100)
+  if (
+    !Number.isSafeInteger(result.total_count) ||
+    result.total_count < 0 ||
+    typeof result.hasMore !== "boolean"
+  ) {
+    throw new Error("아이콘 페이지 정보를 확인해주세요.")
+  }
+  if (result.hasMore && (!Number.isSafeInteger(result.nextOffset) || result.nextOffset <= offset)) {
+    throw new Error("다음 페이지 위치를 확인할 수 없습니다.")
+  }
+  if (result.icons.some((src) => !/^https?:\/\//i.test(src) || !URL.canParse(src))) {
+    throw new Error("아이콘 주소를 확인해주세요.")
+  }
+  /*
       When removing ?icon
       ...new Set(
         result.icons.map((src) => {
@@ -129,34 +129,83 @@ export function loadNativePage(id: number, offset: number): Promise<IconPage> {
         }),
       ),
     */
-    return {
-      number: offset / 100 + 1,
-      images: [...new Set(result.icons)],
-      nextOffset: result.hasMore ? result.nextOffset : null,
-      total: result.total_count,
-    }
-  })
+  return {
+    number: offset / 100 + 1,
+    images: result.icons,
+    nextOffset: result.hasMore ? result.nextOffset : null,
+    total: result.total_count,
+  }
 }
 
-export function loadCollection(preset: Preset): Promise<IconCollection> {
-  return cached(`collection:${preset.id}`, async () => {
-    if (preset.mainId === null) {
-      return {
-        title: preset.title,
-        pages: [await loadNativePage(preset.id, 0)],
-        nativeId: preset.id,
+function loadNativeImages(id: number, previous?: (value: string[]) => void): Promise<string[]> {
+  return loadIconCache(
+    nativeKey(id),
+    async () => {
+      const images: string[] = []
+      let offset = 0
+      while (true) {
+        const { images: pageImages, ...page } = await fetchNativePage(id, offset)
+        images.push(...pageImages)
+        if (page.nextOffset === null) break
+        offset = page.nextOffset
       }
+      return images
+    },
+    previous,
+    validateImages,
+  )
+}
+
+export async function loadNativePage(
+  id: number,
+  offset: number,
+  previous?: (page: IconPage) => void,
+): Promise<IconPage> {
+  const apply = (images: string[]): IconPage => {
+    imageCounts.set(id, images.length)
+    return {
+      number: offset / 100 + 1,
+      total: images.length,
+      nextOffset: offset + 100 < images.length ? offset + 100 : null,
+      images: [...new Set(images.slice(offset, offset + 100))],
     }
-    const article = await readArticle(
-      iconBoardId,
-      preset.mainId,
-      location.hostname === mobileDomain,
-    )
-    if (!article.success) throw new Error("대표 게시글을 읽지 못했습니다.")
-    const { state } = readMain(article.content)
-    if (!state || state.mainArticleId !== preset.mainId) {
-      throw new Error("대표 게시글의 묶음 metadata를 확인해주세요.")
-    }
+  }
+  return apply(await loadNativeImages(id, (value) => previous?.(apply(value))))
+}
+
+function loadMainState(
+  id: number,
+  previous?: (state: NonNullable<ReturnType<typeof readMain>["state"]>) => void,
+) {
+  return loadIconCache(
+    `main:${iconBoardId}:${id}`,
+    async () => {
+      const article = await readArticle(iconBoardId, id, location.hostname === mobileDomain)
+      if (!article.success) throw new Error("대표 게시글을 읽지 못했습니다.")
+      const { state } = readMain(article.content)
+      if (!state || state.mainArticleId !== id)
+        throw new Error("대표 게시글의 묶음 metadata를 확인해주세요.")
+      return state
+    },
+    previous,
+    validateState,
+  )
+}
+
+export async function loadCollection(
+  preset: Preset,
+  previous?: (collection: IconCollection) => void,
+): Promise<IconCollection> {
+  const remember = (collection: IconCollection) => {
+    imageCounts.set(preset.id, collection.pages[0]?.total ?? 0)
+    return collection
+  }
+  if (preset.mainId === null) {
+    const collection = (page: IconPage) =>
+      remember({ title: preset.title, pages: [page], nativeId: preset.id })
+    return collection(await loadNativePage(preset.id, 0, (page) => previous?.(collection(page))))
+  }
+  const collection = (state: NonNullable<ReturnType<typeof readMain>["state"]>): IconCollection => {
     const pages = [...state.slaves]
       .filter((slave) => slave.articleId !== null)
       .sort((a, b) => a.page - b.page)
@@ -174,45 +223,42 @@ export function loadCollection(preset: Preset): Promise<IconCollection> {
         nextOffset: null,
       }))
     const total = pages.reduce((sum, page) => sum + page.images.length, 0)
-    return {
+    return remember({
       title: state.name,
       pages: pages.map((page) => ({ ...page, total })),
       nativeId: null,
-    }
-  })
+    })
+  }
+  return collection(await loadMainState(preset.mainId, (state) => previous?.(collection(state))))
 }
 
-export async function loadAllIconImages(preset: Preset): Promise<string[]> {
-  let ids = [preset.id]
-  if (preset.mainId !== null) {
-    const article = await readArticle(
-      iconBoardId,
-      preset.mainId,
-      location.hostname === mobileDomain,
-    )
-    if (!article.success) throw new Error("대표 게시글을 읽지 못했습니다.")
-    const { state } = readMain(article.content)
-    if (!state || state.mainArticleId !== preset.mainId)
-      throw new Error("대표 게시글의 묶음 metadata를 확인해주세요.")
-    ids = [...state.slaves]
+export async function loadAllIconImages(
+  preset: Preset,
+  previous?: (images: string[]) => void,
+): Promise<string[]> {
+  const idsFromState = (state: NonNullable<ReturnType<typeof readMain>["state"]>) =>
+    [...state.slaves]
       .filter((slave) => slave.articleId !== null)
       .sort((a, b) => a.page - b.page)
       .map((slave) => slave.articleId!)
+  const publishSnapshot = async (ids: number[]) => {
+    const records = await Promise.all(
+      ids.map((id) => readIconCache<string[]>(nativeKey(id), validateImages)),
+    )
+    if (records.some((record) => record !== undefined))
+      previous?.(records.flatMap((record) => record?.value ?? []))
   }
+  let ids = [preset.id]
+  if (preset.mainId !== null) {
+    const record = await readIconCache<NonNullable<ReturnType<typeof readMain>["state"]>>(
+      `main:${iconBoardId}:${preset.mainId}`,
+      validateState,
+    )
+    if (record) await publishSnapshot(idsFromState(record.value))
+    ids = idsFromState(await loadMainState(preset.mainId))
+  }
+  await publishSnapshot(ids)
   const images: string[] = []
-  for (const id of ids) {
-    let offset = 0
-    while (true) {
-      const page = await readIconImages(id, offset, 100)
-      if (page.icons.some((src) => !/^https?:\/\//i.test(src) || !URL.canParse(src)))
-        throw new Error("아이콘 주소를 확인해주세요.")
-      if (typeof page.hasMore !== "boolean") throw new Error("아이콘 페이지 정보를 확인해주세요.")
-      images.push(...page.icons)
-      if (!page.hasMore) break
-      if (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset)
-        throw new Error("다음 페이지 위치를 확인할 수 없습니다.")
-      offset = page.nextOffset
-    }
-  }
+  for (const id of ids) images.push(...(await loadNativeImages(id)))
   return images
 }

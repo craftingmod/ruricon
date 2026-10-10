@@ -14,11 +14,12 @@ mock.module("../entrypoints/lib/ruli-utils.ts", () => ({
   async readIconImages(id, offset, limit) {
     calls.push([id, offset, limit])
     return offset === 0
-      ? { icons: [first, first], hasMore: true, nextOffset: invalidOffset ? 0 : 7 }
-      : { icons: [last], hasMore: false }
+      ? { total_count: 3, icons: [first, first], hasMore: true, nextOffset: invalidOffset ? 0 : 7 }
+      : { total_count: 3, icons: [last], hasMore: false }
   },
 }))
 mock.module("../entrypoints/lib/editor/articleMeta.ts", () => ({
+  validateState() {},
   readMain() {
     return {
       state: {

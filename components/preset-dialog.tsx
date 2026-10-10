@@ -6,6 +6,7 @@ import {
   getCachedImageCount,
   loadCollection,
   orderPresets,
+  type IconCollection,
   type Preset,
 } from "../entrypoints/lib/icon-view.ts"
 import { matchesPreset } from "../entrypoints/lib/preset-search.ts"
@@ -137,30 +138,28 @@ export function PresetDialog({
     if (!request.open || !selected) return
     let active = true
     setPreview(null)
-    loadCollection(selected).then(
-      (collection) => {
-        if (!active) return
-        const page =
-          selected.mainId === null
-            ? collection.pages[0]
-            : collection.pages.find((page) => page.number === 1)
-        setPreview({
+    const apply = (collection: IconCollection) => {
+      if (!active) return
+      const page =
+        selected.mainId === null
+          ? collection.pages[0]
+          : collection.pages.find((page) => page.number === 1)
+      setPreview({
+        id: selected.id,
+        images: page?.images.slice(0, 50) ?? [],
+        total: collection.pages[0]?.total ?? 0,
+        error: "",
+      })
+    }
+    loadCollection(selected, apply).then(apply, (error: unknown) => {
+      if (active)
+        setPreview((previous) => ({
           id: selected.id,
-          images: page?.images.slice(0, 50) ?? [],
-          total: collection.pages[0]?.total ?? 0,
-          error: "",
-        })
-      },
-      (error: unknown) => {
-        if (active)
-          setPreview({
-            id: selected.id,
-            images: [],
-            total: 0,
-            error: error instanceof Error ? error.message : "미리보기를 불러오지 못했습니다.",
-          })
-      },
-    )
+          images: previous?.images ?? [],
+          total: previous?.total ?? 0,
+          error: error instanceof Error ? error.message : "미리보기를 불러오지 못했습니다.",
+        }))
+    })
     return () => {
       active = false
     }
